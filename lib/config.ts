@@ -1,0 +1,53 @@
+export const CONFIG = {
+  memory: {
+    stmMaxTurns: 12,
+    tierThresholds: { mtm: 0.3, ltm: 0.7 },
+    mergeSimilarity: 0.93,
+    decayTau0Ms: 1000 * 60 * 60 * 24 * 7,
+    decayLambda: 2.0,
+    ltmRecurrenceK: 3,
+  },
+  importance: {
+    alpha: 0.3,
+    beta: 0.2,
+    gamma: 0.1,
+    delta: 0.1,
+    epsilon: 0.25,
+    zeta: 0.05,
+  },
+  retrieval: {
+    topK: { mtm: 6, ltmUser: 3, ltmClient: 3 },
+    w: { sem: 0.45, emo: 0.2, rec: 0.15, imp: 0.15, stale: 0.05, redund: 0.15 },
+    tauFreshMs: 1000 * 60 * 60 * 24 * 3,
+    minSemScore: 0.35,
+  },
+  gates: {
+    minSttConfidence: 0.55,
+    minEmotionConfidence: 0.5,
+    minRetrievalScore: 0.4,
+  },
+  deepgram: {
+    sttModel: "nova-2-general",
+    sttTier: "enhanced",
+    ttsModel: "aura-asteria-en",
+    language: "en",
+  },
+  llm: {
+    model: "claude-opus-4-7",
+    maxInputTokens: 6000,
+    maxOutputTokens: 400,
+  },
+  taskCritical: [
+    "payment",
+    "refund",
+    "cancel",
+    "medical",
+    "legal",
+    "safety",
+    "signal",
+    "outage",
+    "password",
+    "charge",
+    "escalate",
+  ],
+} as const;
