@@ -66,7 +66,7 @@ export async function ingestDocument(args: {
   const chunkIds: string[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
-    const chunkId = seedClientMemory({
+    const chunkId = await seedClientMemory({
       clientId,
       topic: `kb:${topic}`,
       text: chunks[i],
@@ -82,14 +82,14 @@ export async function ingestDocument(args: {
  * Queries the LTM_client knowledge base directly.
  * Returns top-K chunks ranked by semantic similarity.
  */
-export function queryKnowledgeBase(args: {
+export async function queryKnowledgeBase(args: {
   clientId: string;
   query: string;
   topK?: number;
-}): Array<{ text: string; topic: string; similarity: number; id: string }> {
+}): Promise<Array<{ text: string; topic: string; similarity: number; id: string }>> {
   const queryEmbedding = embed(args.query);
   const topK = args.topK ?? 5;
-  const results = vectorStore.search({
+  const results = await vectorStore.search({
     tier: "LTM_client",
     userId: null,
     clientId: args.clientId,

@@ -33,7 +33,7 @@ export const CONFIG = {
     language: "en",
   },
   llm: {
-    model: "llama3-70b-8192", // Groq fast LLaMA 3
+    model: "llama-3.3-70b-versatile",
     baseURL: "https://api.groq.com/openai/v1",
     maxInputTokens: 6000,
     maxOutputTokens: 400,

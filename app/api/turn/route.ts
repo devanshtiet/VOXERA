@@ -15,7 +15,7 @@ const TurnSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  ensureSeeded();
+  await ensureSeeded();
   const body = await request.json();
   const parsed = TurnSchema.safeParse(body);
   if (!parsed.success) {

@@ -2,7 +2,7 @@ import { handleTurn } from "../lib/agent/orchestrator";
 import { DEMO, ensureSeeded } from "../lib/bootstrap";
 
 async function main() {
-  ensureSeeded();
+  await ensureSeeded();
 
   const turns = [
     "Hi, I think there might be an issue with my signal again.",

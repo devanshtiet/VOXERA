@@ -5,7 +5,7 @@ import { classifyConfidence } from "../lib/emotion/confidence";
 import { vectorStore } from "../lib/memory/store";
 
 async function main() {
-  ensureSeeded();
+  await ensureSeeded();
   console.log("=== Knowledge Base Smoke Test ===\n");
 
   // ---------------------------------------------------------------
@@ -69,12 +69,26 @@ async function main() {
   console.log(`Document ID: ${result.documentId}`);
   console.log(`Chunks ingested: ${result.chunkCount}`);
   console.log(`Chunk IDs: ${result.chunkIds.join(", ")}`);
-  console.log(`Store sizes:`, vectorStore.size());
+  console.log(`Store sizes:`, await vectorStore.size());
 
   // ---------------------------------------------------------------
   // 3. Test knowledge base query
   // ---------------------------------------------------------------
   console.log("\n--- Query Test ---");
+
+  await seedClientMemory({
+    clientId: DEMO.clientId,
+    topic: "policy",
+    text: "Never offer refunds exceeding $50 without manager approval.",
+    importance: 0.95,
+  });
+  await seedClientMemory({
+    clientId: DEMO.clientId,
+    topic: "technical",
+    text: "If the router displays a blinking red light, instruct the user to power cycle it for 30 seconds.",
+    importance: 0.8,
+  });
+
   const queries = [
     "How much does a deluxe room cost?",
     "What is the cancellation policy?",
@@ -83,7 +97,7 @@ async function main() {
   ];
 
   for (const q of queries) {
-    const results = queryKnowledgeBase({
+    const results = await queryKnowledgeBase({
       clientId: DEMO.clientId,
       query: q,
       topK: 2,

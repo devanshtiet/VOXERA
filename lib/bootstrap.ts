@@ -9,23 +9,24 @@ export const DEMO = {
   sessionId: "session_local",
 };
 
-export function ensureSeeded() {
+export async function ensureSeeded() {
   if (seeded) return;
-  if (vectorStore.byTier("LTM_client", null, DEMO.clientId).length > 0) {
+  const ltmCands = await vectorStore.byTier("LTM_client", null, DEMO.clientId);
+  if (ltmCands.length > 0) {
     seeded = true;
     return;
   }
-  seedClientMemory({
+  await seedClientMemory({
     clientId: DEMO.clientId,
     topic: "brand_voice",
     text: "Brand voice: warm, direct, never defensive. Prefer short sentences. Apologize sincerely when the user is frustrated. Offer concrete next steps.",
   });
-  seedClientMemory({
+  await seedClientMemory({
     clientId: DEMO.clientId,
     topic: "compliance",
     text: "Compliance: never disclose account balances without explicit identity confirmation. For distress signals, follow safety-first protocol.",
   });
-  seedClientMemory({
+  await seedClientMemory({
     clientId: DEMO.clientId,
     topic: "escalation",
     text: "Escalation matrix: repeated signal complaint with negative valence → route to Tier-2 within 60 seconds. Chronic issues → offer service credit.",

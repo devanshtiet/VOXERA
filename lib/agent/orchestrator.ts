@@ -60,21 +60,21 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
 
   const evBase = { sessionId: input.sessionId, userId: input.userId, clientId: input.clientId };
 
-  const ltmUserAll = vectorStore.byTier("LTM_user", input.userId, input.clientId);
+  const ltmUserAll = await vectorStore.byTier("LTM_user", input.userId, input.clientId);
   const emotionCtx = buildEmotionContext({
     current: fused,
     stm: stm.get(input.sessionId),
     ltmUser: ltmUserAll,
   });
 
-  logSessionEvent(makeEvent(evBase, "utterance", {
+  await logSessionEvent(makeEvent(evBase, "utterance", {
     utteranceId: userTurn.id,
     role: userTurn.role,
     text: userTurn.text,
     sttConfidence: sttConf,
   }));
 
-  logSessionEvent(makeEvent(evBase, "emotion", {
+  await logSessionEvent(makeEvent(evBase, "emotion", {
     label: fused.label,
     intensity: fused.intensity,
     confidence: fused.confidence,
@@ -86,7 +86,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   }));
 
   const queryEmbedding = embed(input.transcript);
-  const mtmExisting = vectorStore.byTier("MTM", input.userId, input.clientId);
+  const mtmExisting = await vectorStore.byTier("MTM", input.userId, input.clientId);
   const I = importanceScore({
     text: input.transcript,
     emotion: emotionCtx,
@@ -96,7 +96,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     policyFlag: policyFlag(emotionCtx),
   });
 
-  const memoryWrite = writeMemory({
+  const memoryWrite = await writeMemory({
     utterance: userTurn,
     userId: input.userId,
     clientId: input.clientId,
@@ -104,14 +104,14 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     importance: I,
   });
 
-  logSessionEvent(makeEvent(evBase, "memory_write", {
+  await logSessionEvent(makeEvent(evBase, "memory_write", {
     tier: memoryWrite.tier,
     recordId: memoryWrite.recordId,
     merged: memoryWrite.merged,
     importance: I,
   }));
 
-  const retrieved = retrieve({
+  const retrieved = await retrieve({
     sessionId: input.sessionId,
     userId: input.userId,
     clientId: input.clientId,
@@ -121,14 +121,14 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
 
   const policy = decidePolicy(emotionCtx);
 
-  logSessionEvent(makeEvent(evBase, "retrieval", {
+  await logSessionEvent(makeEvent(evBase, "retrieval", {
     mtmIds: retrieved.mtm.map((m) => m.id),
     ltmUserIds: retrieved.ltmUser.map((m) => m.id),
     ltmClientIds: retrieved.ltmClient.map((m) => m.id),
     scores: retrieved.scores,
   }));
 
-  logSessionEvent(makeEvent(evBase, "policy", {
+  await logSessionEvent(makeEvent(evBase, "policy", {
     acknowledgeFirst: policy.acknowledgeFirst,
     pace: policy.pace,
     allowUpsell: policy.allowUpsell,
@@ -165,12 +165,12 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   };
   stm.push(input.sessionId, agentTurn);
 
-  logSessionEvent(makeEvent(evBase, "guard", {
+  await logSessionEvent(makeEvent(evBase, "guard", {
     ok: guarded.ok,
     reasons: guarded.reasons,
   }));
 
-  logSessionEvent(makeEvent(evBase, "llm_reply", {
+  await logSessionEvent(makeEvent(evBase, "llm_reply", {
     model: llmReply.model,
     usedLive: llmReply.usedLive,
     replyLength: guarded.cleaned.length,

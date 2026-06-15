@@ -1,9 +1,4 @@
-import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
-// ---------------------------------------------------------------------------
-// Session event types (FR-21)
-// ---------------------------------------------------------------------------
+import { supabase } from "../db/supabase";
 
 export type SessionEventType =
   | "utterance"
@@ -24,44 +19,32 @@ export interface SessionEvent {
   payload: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// File-based JSONL logger
-// ---------------------------------------------------------------------------
-
-const DATA_DIR = join(process.cwd(), "data", "sessions");
-
-function ensureDir() {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
+/**
+ * Appends a single session event to the Supabase session_logs table.
+ */
+export async function logSessionEvent(event: SessionEvent): Promise<void> {
+  const { error } = await supabase.from("session_logs").insert([event]);
+  if (error) {
+    console.error("[Logger] Failed to write session event to Supabase:", error);
   }
 }
 
-function sessionPath(sessionId: string): string {
-  // Sanitize the session ID to prevent path traversal.
-  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return join(DATA_DIR, `${safe}.jsonl`);
-}
-
 /**
- * Appends a single session event as a JSON line to the session log file.
+ * Reads and parses all events for a given session from Supabase.
  */
-export function logSessionEvent(event: SessionEvent): void {
-  ensureDir();
-  const line = JSON.stringify(event) + "\n";
-  appendFileSync(sessionPath(event.sessionId), line, "utf-8");
-}
+export async function getSessionLog(sessionId: string): Promise<SessionEvent[]> {
+  const { data, error } = await supabase
+    .from("session_logs")
+    .select("*")
+    .eq("sessionId", sessionId)
+    .order("ts", { ascending: true });
 
-/**
- * Reads and parses all events for a given session.
- * Returns an empty array if the session file doesn't exist.
- */
-export function getSessionLog(sessionId: string): SessionEvent[] {
-  const path = sessionPath(sessionId);
-  if (!existsSync(path)) return [];
+  if (error || !data) {
+    console.error("[Logger] Failed to read session log:", error);
+    return [];
+  }
 
-  const raw = readFileSync(path, "utf-8");
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-  return lines.map((l) => JSON.parse(l) as SessionEvent);
+  return data as SessionEvent[];
 }
 
 /**

@@ -37,11 +37,11 @@ export interface WriteInput {
   importance: number;
 }
 
-export function writeMemory(input: WriteInput): {
+export async function writeMemory(input: WriteInput): Promise<{
   tier: "STM" | "MTM" | "LTM_user" | "discarded";
   recordId?: string;
   merged?: boolean;
-} {
+}> {
   const { utterance, userId, clientId, emotion, importance } = input;
   const { tierThresholds, mergeSimilarity } = CONFIG.memory;
 
@@ -52,17 +52,17 @@ export function writeMemory(input: WriteInput): {
   const embedding = embed(utterance.text);
   const topic = inferTopic(utterance.text);
 
-  const mtmCandidates = vectorStore.byTier("MTM", userId, clientId);
+  const mtmCandidates = await vectorStore.byTier("MTM", userId, clientId);
   const sameTopic = mtmCandidates.filter((m) => m.topic === topic);
   for (const cand of sameTopic) {
     const sim = cosine(embedding, cand.embedding);
     if (sim >= mergeSimilarity && cand.emotion === emotion.current.label) {
-      vectorStore.update(cand.id, {
+      await vectorStore.update(cand.id, {
         recurrence: cand.recurrence + 1,
         ts: utterance.ts,
         importance: Math.max(cand.importance, importance),
       });
-      maybePromote(cand.id, userId, clientId);
+      await maybePromote(cand.id, userId, clientId);
       return { tier: "MTM", recordId: cand.id, merged: true };
     }
   }
@@ -87,17 +87,17 @@ export function writeMemory(input: WriteInput): {
     resolved: false,
     ttl: Date.now() + (importance >= tierThresholds.ltm ? 1000 * 60 * 60 * 24 * 90 : 1000 * 60 * 60 * 24 * 30),
   };
-  vectorStore.put(rec);
+  await vectorStore.put(rec);
 
   if (importance >= tierThresholds.ltm) {
-    maybePromote(rec.id, userId, clientId);
+    await maybePromote(rec.id, userId, clientId);
   }
 
   return { tier: "MTM", recordId: rec.id, merged: false };
 }
 
-function maybePromote(mtmId: string, userId: string, clientId: string) {
-  const src = vectorStore.get(mtmId);
+async function maybePromote(mtmId: string, userId: string, clientId: string) {
+  const src = await vectorStore.get(mtmId);
   if (!src) return;
   if (src.recurrence < CONFIG.memory.ltmRecurrenceK) return;
 
@@ -111,13 +111,13 @@ function maybePromote(mtmId: string, userId: string, clientId: string) {
     ttl: undefined,
     sourceUtteranceIds: [...src.sourceUtteranceIds],
   };
-  vectorStore.put(ltmRec);
+  await vectorStore.put(ltmRec);
   void userId;
   void clientId;
 }
 
 // Seed a client-level memory (brand voice, escalation rules, compliance).
-export function seedClientMemory(args: {
+export async function seedClientMemory(args: {
   clientId: string;
   text: string;
   topic: string;
@@ -143,6 +143,6 @@ export function seedClientMemory(args: {
     recurrence: 1,
     resolved: true,
   };
-  vectorStore.put(rec);
+  await vectorStore.put(rec);
   return rec.id;
 }

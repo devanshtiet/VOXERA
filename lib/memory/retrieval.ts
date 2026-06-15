@@ -63,14 +63,16 @@ function scoreRecord(
   return w.sem * sem + wEmo * emo + w.rec * rec_ + w.imp * imp - w.stale * stale - w.redund * redund;
 }
 
-export function retrieve(req: RetrievalRequest): RetrievedContext {
+export async function retrieve(req: RetrievalRequest): Promise<RetrievedContext> {
   const queryEmb = embed(req.queryText);
   const stmTurns = stm.get(req.sessionId);
   const boostEmotion = req.emotion.flags.increasing_distress || req.emotion.flags.repeated_frustration;
 
-  const mtmCandidates = vectorStore.byTier("MTM", req.userId, req.clientId);
-  const ltmUserCands = vectorStore.byTier("LTM_user", req.userId, req.clientId);
-  const ltmClientCands = vectorStore.byTier("LTM_client", null, req.clientId);
+  const [mtmCandidates, ltmUserCands, ltmClientCands] = await Promise.all([
+    vectorStore.byTier("MTM", req.userId, req.clientId),
+    vectorStore.byTier("LTM_user", req.userId, req.clientId),
+    vectorStore.byTier("LTM_client", null, req.clientId)
+  ]);
 
   const pick = (cands: MemoryRecord[], topK: number, minSem: number | null) => {
     const selected: MemoryRecord[] = [];

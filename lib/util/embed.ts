@@ -2,7 +2,7 @@
 // memory + retrieval pipeline to work without an external embedding service.
 // Swap for a real embedder by implementing the same signature.
 
-const DIM = 256;
+const DIM = 1536;
 
 function hashStr(s: string, seed: number): number {
   let h = seed >>> 0;

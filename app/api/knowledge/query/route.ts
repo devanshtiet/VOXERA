@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  ensureSeeded();
+  await ensureSeeded();
 
   const body = (await request.json()) as {
     query?: string;
