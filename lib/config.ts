@@ -50,4 +50,10 @@ export const CONFIG = {
     "charge",
     "escalate",
   ],
+  knowledge: {
+    chunkSize: 500,
+    chunkOverlap: 100,
+    maxFileSizeBytes: 5 * 1024 * 1024,
+    allowedMimeTypes: ["text/plain", "application/pdf"] as string[],
+  },
 } as const;

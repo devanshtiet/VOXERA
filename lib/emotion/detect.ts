@@ -1,5 +1,6 @@
 import type { EmotionLabel, EmotionSignal, VAD } from "../types";
 import { clamp } from "../util/math";
+import { classifyConfidence } from "./confidence";
 import { LEXICON } from "./lexicon";
 
 // Text emotion detector. Lexicon + caps/punctuation cues.
@@ -49,6 +50,7 @@ export function detectTextEmotion(text: string): EmotionSignal {
     label,
     intensity,
     confidence,
+    confidenceCategory: classifyConfidence(confidence),
     vad,
     source: "text",
     at: Date.now(),
@@ -75,5 +77,5 @@ export function fuseEmotion(text: EmotionSignal, audio: EmotionSignal | null): E
   const label = audio.confidence > text.confidence ? audio.label : text.label;
   const intensity = clamp(Math.sqrt(vad.v * vad.v + vad.a * vad.a + vad.d * vad.d) / Math.sqrt(3));
   const confidence = clamp((audio.confidence + text.confidence) / 2 + 0.05);
-  return { label, intensity, confidence, vad, source: "fused", at: Date.now() };
+  return { label, intensity, confidence, confidenceCategory: classifyConfidence(confidence), vad, source: "fused", at: Date.now() };
 }

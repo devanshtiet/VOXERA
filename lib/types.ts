@@ -11,6 +11,8 @@ export type EmotionLabel =
   | "joy"
   | "gratitude";
 
+export type ConfidenceCategory = "high" | "medium" | "low";
+
 export interface VAD {
   v: number;
   a: number;
@@ -21,6 +23,7 @@ export interface EmotionSignal {
   label: EmotionLabel;
   intensity: number;
   confidence: number;
+  confidenceCategory?: ConfidenceCategory;
   vad: VAD;
   source: "text" | "audio" | "fused";
   at: number;

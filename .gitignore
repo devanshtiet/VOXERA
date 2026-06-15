@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# session logs & local data
+/data/
+
+# planning files (local only)
+VOXERA_IMPLEMENTATION_ROADMAP.md
+VOXERA_USER_SETUP_GUIDE.md
+VOXERA_AGENT_INSTRUCTIONS.md
