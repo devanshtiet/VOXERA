@@ -114,7 +114,8 @@ async function extractPdfText(content: Buffer | Uint8Array): Promise<string> {
     // Dynamic import so the module is optional — the rest of the
     // knowledge base still works with plain text files if pdf-parse
     // is not installed.
-    const pdfParse = (await import("pdf-parse")).default;
+    const pdfParseModule = await import("pdf-parse");
+    const pdfParse = (pdfParseModule as any).default || pdfParseModule;
     const buf = Buffer.isBuffer(content) ? content : Buffer.from(content);
     const result = await pdfParse(buf);
     return result.text;

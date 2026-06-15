@@ -8,8 +8,19 @@ import type { ConfidenceCategory } from "../types";
  *  - Medium: >= 0.50 and < 0.80
  *  - Low:    < 0.50
  */
-export function classifyConfidence(score: number): ConfidenceCategory {
-  if (score >= 0.8) return "high";
-  if (score >= 0.5) return "medium";
-  return "low";
+export function classifyConfidence(confidence: number, params?: { 
+  lexiconMatch?: boolean, 
+  acousticEnergy?: number 
+}): ConfidenceCategory {
+  let explanation = "Standard confidence threshold calculation.";
+  
+  if (params?.lexiconMatch && params?.acousticEnergy && params.acousticEnergy > 0.8) {
+    explanation = "High confidence due to strong lexicon match and high vocal energy.";
+  } else if (!params?.lexiconMatch && confidence < 0.5) {
+    explanation = "Low confidence: weak lexicon match and ambiguous signal.";
+  }
+
+  if (confidence >= 0.8) return { level: "high", explanation };
+  if (confidence >= 0.5) return { level: "medium", explanation };
+  return { level: "low", explanation };
 }

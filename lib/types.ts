@@ -11,7 +11,10 @@ export type EmotionLabel =
   | "joy"
   | "gratitude";
 
-export type ConfidenceCategory = "high" | "medium" | "low";
+export interface ConfidenceCategory {
+  level: "high" | "medium" | "low";
+  explanation: string;
+}
 
 export interface VAD {
   v: number;
