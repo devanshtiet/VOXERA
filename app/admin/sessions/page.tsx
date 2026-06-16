@@ -49,40 +49,40 @@ export default function SessionsPage() {
   };
 
   return (
-    <div className="p-8 font-sans text-gray-900 bg-white min-h-screen">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">Session History</h1>
-        <p className="text-gray-500 mt-2">
+    <div className="p-6 md:p-10 font-body min-h-screen">
+      <header className="mb-10">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-[var(--color-text-primary)]">Session History</h1>
+        <p className="text-[15px] text-[var(--color-text-secondary)] mt-2">
           Browse past conversations and inspect the full event timeline.
         </p>
       </header>
 
-      <div className="flex gap-6">
+      <div className="flex flex-col md:flex-row gap-8">
         {/* Session List */}
-        <div className="w-80 flex-none">
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Sessions</h2>
+        <div className="w-full md:w-[320px] flex-none">
+          <h2 className="text-[11px] font-mono font-bold text-[var(--color-text-secondary)] uppercase tracking-widest mb-4">Sessions</h2>
           {loading ? (
-            <p className="text-gray-400 text-sm animate-pulse">Loading...</p>
+            <p className="text-[var(--color-text-muted)] text-[13px] animate-pulse">Loading...</p>
           ) : sessions.length === 0 ? (
-            <p className="text-gray-400 text-sm italic">No sessions found.</p>
+            <p className="text-[var(--color-text-muted)] text-[13px] italic">No sessions found.</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {sessions.map((s) => (
                 <button
                   key={s.sessionId}
                   onClick={() => loadSession(s.sessionId)}
-                  className={`w-full text-left p-3 rounded-lg border transition-all ${
+                  className={`w-full text-left p-4 rounded-xl border transition-all ${
                     selectedSession === s.sessionId
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                      ? "border-[var(--color-border-active)] bg-[var(--color-bg-surface)] shadow-[0_0_15px_var(--color-accent-glow)]"
+                      : "border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] hover:border-[var(--color-border-active)]"
                   }`}
                 >
-                  <div className="font-mono text-xs text-gray-600 truncate">{s.sessionId}</div>
-                  <div className="flex gap-2 mt-1.5 text-[10px]">
-                    <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">{s.eventCount} events</span>
-                    <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded capitalize">{s.dominantEmotion}</span>
+                  <div className="font-mono text-[12px] font-medium text-[var(--color-text-primary)] truncate mb-2">{s.sessionId}</div>
+                  <div className="flex gap-2 text-[10px] font-mono font-bold uppercase tracking-widest">
+                    <span className="px-2 py-1 bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-accent-cyan)] rounded-md">{s.eventCount} events</span>
+                    <span className="px-2 py-1 bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-accent-violet)] rounded-md capitalize">{s.dominantEmotion}</span>
                   </div>
-                  <div className="text-[10px] text-gray-400 mt-1">{new Date(s.lastTs).toLocaleString()}</div>
+                  <div className="text-[11px] text-[var(--color-text-muted)] mt-3">{new Date(s.lastTs).toLocaleString()}</div>
                 </button>
               ))}
             </div>
@@ -90,29 +90,29 @@ export default function SessionsPage() {
         </div>
 
         {/* Event Timeline */}
-        <div className="flex-1">
+        <div className="flex-1 bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 lg:p-8 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
           {!selectedSession ? (
-            <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
+            <div className="flex items-center justify-center h-64 text-[var(--color-text-muted)] text-[14px]">
               Select a session to view its event timeline
             </div>
           ) : eventsLoading ? (
-            <div className="text-gray-400 text-sm animate-pulse">Loading events...</div>
+            <div className="text-[var(--color-text-muted)] text-[14px] animate-pulse">Loading events...</div>
           ) : (
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                Timeline — <span className="font-mono text-gray-700">{selectedSession.slice(0, 12)}...</span> ({events.length} events)
+            <div className="space-y-4">
+              <h2 className="text-[11px] font-mono font-bold text-[var(--color-text-secondary)] uppercase tracking-widest mb-6">
+                Timeline — <span className="text-[var(--color-accent-cyan)]">{selectedSession.slice(0, 12)}...</span> ({events.length} events)
               </h2>
               {events.map((ev, i) => (
-                <div key={i} className="flex gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
-                  <div className="flex-none pt-0.5">
-                    <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5" />
+                <div key={i} className="flex gap-4 p-4 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)]">
+                  <div className="flex-none pt-1">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[var(--color-accent-cyan)] shadow-[0_0_8px_var(--color-accent-cyan)]" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-gray-900 capitalize text-sm">{ev.type.replace(/_/g, " ")}</span>
-                      <span className="text-[10px] text-gray-400">{new Date(ev.ts).toLocaleTimeString()}</span>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-semibold text-[var(--color-text-primary)] capitalize text-[14px]">{ev.type.replace(/_/g, " ")}</span>
+                      <span className="text-[11px] font-mono text-[var(--color-text-muted)]">{new Date(ev.ts).toLocaleTimeString()}</span>
                     </div>
-                    <pre className="text-[10px] text-gray-600 whitespace-pre-wrap font-mono break-all bg-white p-2 rounded border border-gray-100">
+                    <pre className="text-[12px] text-[var(--color-text-secondary)] whitespace-pre-wrap font-mono break-all bg-[var(--color-bg-base)] p-3 rounded-lg border border-[var(--color-border-subtle)]">
                       {JSON.stringify(ev.payload, null, 2)}
                     </pre>
                   </div>

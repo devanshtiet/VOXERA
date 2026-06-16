@@ -1,19 +1,26 @@
 import { login } from "./actions";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
 export default async function LoginPage(props: {
   searchParams: Promise<{ error?: string }>;
 }) {
   const searchParams = await props.searchParams;
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50 font-sans text-gray-900">
-      <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg border border-gray-100">
+    <div className="flex items-center justify-center min-h-screen bg-[var(--color-bg-base)] font-body text-[var(--color-text-primary)]">
+      {/* Background ambient glow */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[var(--color-accent-violet)] rounded-full blur-[120px] opacity-10 pointer-events-none" />
+
+      <div className="relative w-full max-w-md p-8 sm:p-10 space-y-8 bg-[var(--color-bg-elevated)] rounded-2xl shadow-[0_0_40px_var(--color-accent-glow)] border border-[var(--color-border-subtle)]">
         <div className="text-center">
-          <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">VOXERA</h1>
-          <p className="mt-2 text-sm text-gray-500">Sign in to your dashboard</p>
+          <Link href="/" className="inline-block font-display font-extrabold text-3xl tracking-tighter text-gradient">
+            VOXERA
+          </Link>
+          <p className="mt-3 text-[14px] text-[var(--color-text-secondary)]">Sign in to your dashboard</p>
         </div>
 
         {searchParams?.error && (
-          <div className="p-3 text-sm text-red-600 bg-red-50 rounded-lg">
+          <div className="p-4 text-[13px] text-red-400 bg-red-950/30 border border-red-900/50 rounded-xl">
             {searchParams.error}
           </div>
         )}
@@ -21,24 +28,24 @@ export default async function LoginPage(props: {
         <form className="mt-8 space-y-6" action={login}>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Email Address</label>
+              <label className="block text-[12px] font-mono font-bold tracking-widest text-[var(--color-text-secondary)] uppercase mb-2">Email Address</label>
               <input
                 id="email"
                 name="email"
                 type="email"
                 required
-                className="w-full px-3 py-2 mt-1 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
+                className="w-full px-4 py-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl focus:ring-1 focus:ring-[var(--color-accent-cyan)] focus:border-[var(--color-accent-cyan)] text-[14px] text-[var(--color-text-primary)] transition-colors placeholder:text-[var(--color-text-muted)]"
                 placeholder="admin@voxera.ai"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Password</label>
+              <label className="block text-[12px] font-mono font-bold tracking-widest text-[var(--color-text-secondary)] uppercase mb-2">Password</label>
               <input
                 id="password"
                 name="password"
                 type="password"
                 required
-                className="w-full px-3 py-2 mt-1 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
+                className="w-full px-4 py-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl focus:ring-1 focus:ring-[var(--color-accent-cyan)] focus:border-[var(--color-accent-cyan)] text-[14px] text-[var(--color-text-primary)] transition-colors placeholder:text-[var(--color-text-muted)]"
                 placeholder="••••••••"
               />
             </div>
@@ -46,9 +53,10 @@ export default async function LoginPage(props: {
 
           <button
             type="submit"
-            className="w-full px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="group flex items-center justify-center gap-2 w-full px-4 py-3 text-[14px] font-semibold text-white btn-gradient rounded-xl transition-all hover:scale-[1.02] shadow-[0_0_15px_var(--color-accent-glow)]"
           >
             Sign in
+            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
           </button>
         </form>
       </div>

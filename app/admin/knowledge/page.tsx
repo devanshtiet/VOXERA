@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { UploadCloud, FileText, CheckCircle2, AlertCircle } from "lucide-react";
 
 interface KnowledgeEntry {
   id: string;
@@ -30,7 +31,7 @@ export default function KnowledgeBasePage() {
         setLoadingEntries(false);
       })
       .catch(() => setLoadingEntries(false));
-  }, [result]); // re-fetch after successful upload
+  }, [result]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -69,7 +70,6 @@ export default function KnowledgeBasePage() {
     }
   };
 
-  // Group entries by topic
   const grouped = entries.reduce<Record<string, KnowledgeEntry[]>>((acc, e) => {
     const topic = e.topic || "general";
     if (!acc[topic]) acc[topic] = [];
@@ -78,40 +78,27 @@ export default function KnowledgeBasePage() {
   }, {});
 
   return (
-    <div className="p-8 font-sans text-gray-900 bg-white min-h-screen">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">Knowledge Base</h1>
-        <p className="text-gray-500 mt-2">
+    <div className="p-6 md:p-10 font-body min-h-screen">
+      <header className="mb-10">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-[var(--color-text-primary)]">Knowledge Base</h1>
+        <p className="text-[15px] text-[var(--color-text-secondary)] mt-2">
           Upload PDFs or Text files to train your AI receptionist.
         </p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Upload Panel */}
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Document</h2>
+        <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 lg:p-8 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+          <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-6">Upload Document</h2>
           <form onSubmit={handleUpload} className="space-y-6">
             <div>
-              <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 transition-colors bg-white">
-                <div className="space-y-1 text-center">
-                  <svg
-                    className="mx-auto h-12 w-12 text-gray-400"
-                    stroke="currentColor"
-                    fill="none"
-                    viewBox="0 0 48 48"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <div className="flex text-sm text-gray-600 justify-center">
+              <div className="flex justify-center px-6 pt-8 pb-8 border-2 border-dashed border-[var(--color-border-subtle)] rounded-xl hover:border-[var(--color-accent-cyan)] transition-colors bg-[var(--color-bg-surface)]">
+                <div className="space-y-2 text-center flex flex-col items-center">
+                  <UploadCloud className="w-10 h-10 text-[var(--color-text-muted)] mb-2" />
+                  <div className="flex text-[14px] text-[var(--color-text-secondary)] justify-center">
                     <label
                       htmlFor="file-upload"
-                      className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none"
+                      className="relative cursor-pointer rounded-md font-semibold text-[var(--color-accent-cyan)] hover:text-white transition-colors focus-within:outline-none"
                     >
                       <span>Upload a file</span>
                       <input
@@ -125,12 +112,12 @@ export default function KnowledgeBasePage() {
                     </label>
                     <p className="pl-1">or drag and drop</p>
                   </div>
-                  <p className="text-xs text-gray-500">TXT or PDF up to 5MB</p>
+                  <p className="text-[12px] text-[var(--color-text-muted)] font-mono">TXT or PDF up to 5MB</p>
                 </div>
               </div>
               {file && (
-                <p className="mt-2 text-sm text-green-600 font-medium">
-                  Selected: {file.name}
+                <p className="mt-3 text-[13px] text-[var(--color-accent-cyan)] font-mono font-medium flex items-center gap-2">
+                  <FileText className="w-4 h-4" /> Selected: {file.name}
                 </p>
               )}
             </div>
@@ -138,51 +125,59 @@ export default function KnowledgeBasePage() {
             <button
               type="submit"
               disabled={!file || isUploading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full flex justify-center py-3 px-4 rounded-xl text-[14px] font-semibold text-white btn-gradient shadow-[0_0_15px_var(--color-accent-glow)] hover:scale-[1.02] transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none disabled:cursor-not-allowed"
             >
               {isUploading ? "Uploading & Indexing..." : "Ingest Document"}
             </button>
           </form>
 
           {error && (
-            <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-md">
-              <h3 className="text-sm font-medium text-red-800">Upload Error</h3>
-              <p className="mt-1 text-sm text-red-700">{error}</p>
+            <div className="mt-6 p-4 bg-red-950/30 border border-red-900/50 rounded-xl flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+              <div>
+                <h3 className="text-[14px] font-semibold text-red-400">Upload Error</h3>
+                <p className="mt-1 text-[13px] text-red-500/80">{error}</p>
+              </div>
             </div>
           )}
 
           {result && (
-            <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-md">
-              <h3 className="text-sm font-medium text-green-800">Success!</h3>
-              <p className="mt-1 text-sm text-green-700">
-                Document ingested. Broken down into {result.chunkCount} semantic chunks.
-              </p>
+            <div className="mt-6 p-4 bg-emerald-950/30 border border-emerald-900/50 rounded-xl flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
+              <div>
+                <h3 className="text-[14px] font-semibold text-emerald-400">Success!</h3>
+                <p className="mt-1 text-[13px] text-emerald-500/80">
+                  Document ingested. Broken down into {result.chunkCount} semantic chunks.
+                </p>
+              </div>
             </div>
           )}
         </div>
 
         {/* Ingested Knowledge List */}
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Ingested Knowledge <span className="text-sm font-normal text-gray-500">({entries.length} chunks)</span>
-          </h2>
+        <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 lg:p-8 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)]">Ingested Knowledge</h2>
+            <span className="px-2 py-1 bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] rounded text-[10px] font-mono text-[var(--color-accent-cyan)]">{entries.length} CHUNKS</span>
+          </div>
+
           {loadingEntries ? (
-            <p className="text-gray-400 text-sm animate-pulse">Loading...</p>
+            <p className="text-[var(--color-text-muted)] text-[13px] animate-pulse">Loading...</p>
           ) : Object.keys(grouped).length === 0 ? (
-            <p className="text-gray-400 text-sm italic">No knowledge documents ingested yet.</p>
+            <p className="text-[var(--color-text-muted)] text-[13px] italic">No knowledge documents ingested yet.</p>
           ) : (
-            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 hide-scrollbar">
               {Object.entries(grouped).map(([topic, items]) => (
-                <details key={topic} className="bg-white rounded-lg border border-gray-200">
-                  <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-900 hover:bg-gray-50 rounded-lg flex justify-between items-center">
-                    <span className="capitalize">{topic.replace("kb:", "📄 ")}</span>
-                    <span className="text-xs text-gray-400">{items.length} chunks</span>
+                <details key={topic} className="group bg-[var(--color-bg-surface)] rounded-xl border border-[var(--color-border-subtle)] overflow-hidden">
+                  <summary className="cursor-pointer px-4 py-3 text-[14px] font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] flex justify-between items-center transition-colors">
+                    <span className="capitalize flex items-center gap-2"><FileText className="w-4 h-4 text-[var(--color-accent-violet)]" /> {topic.replace("kb:", "")}</span>
+                    <span className="text-[11px] font-mono text-[var(--color-text-muted)]">{items.length} chunks</span>
                   </summary>
-                  <div className="px-4 pb-3 space-y-2">
+                  <div className="px-4 pb-4 pt-1 space-y-2">
                     {items.map((item) => (
-                      <div key={item.id} className="text-xs text-gray-600 p-2 bg-gray-50 rounded border border-gray-100">
-                        <div className="font-mono text-[10px] text-gray-400 mb-1">ID: {item.id}</div>
-                        <p className="line-clamp-3">{item.text}</p>
+                      <div key={item.id} className="text-[12px] text-[var(--color-text-secondary)] p-3 bg-[var(--color-bg-base)] rounded-lg border border-[var(--color-border-subtle)]">
+                        <div className="font-mono text-[10px] text-[var(--color-accent-cyan)] mb-1.5 opacity-70">ID: {item.id}</div>
+                        <p className="line-clamp-3 leading-relaxed">{item.text}</p>
                       </div>
                     ))}
                   </div>
