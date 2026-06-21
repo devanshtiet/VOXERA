@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "../../../lib/db/supabase";
 import { createClient } from "../../../lib/db/server";
+import { callQueue } from "../../../lib/queue/manager";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +91,23 @@ export async function GET() {
     const activeBookings = (bookings || []).filter((b) => b.status === "confirmed").length;
     const cancelledBookings = (bookings || []).filter((b) => b.status === "cancelled").length;
 
+    // 3. Fetch Phone Call Metrics (FR-1, FR-19)
+    const { data: callLogs } = await supabase
+      .from("call_logs")
+      .select("id, status, durationMs")
+      .eq("clientId", clientId);
+
+    const safeCalls = callLogs || [];
+    const totalPhoneCalls = safeCalls.length;
+    const completedCalls = safeCalls.filter((c) => c.status === "completed");
+    const avgCallDurationMs =
+      completedCalls.length > 0
+        ? Math.round(completedCalls.reduce((s, c) => s + (c.durationMs || 0), 0) / completedCalls.length)
+        : 0;
+
+    // 4. Live queue metrics from in-process CallQueueManager
+    const queueMetrics = callQueue.getMetrics();
+
     return NextResponse.json({
       metrics: {
         totalCalls,
@@ -98,6 +116,11 @@ export async function GET() {
         cancelledBookings,
         escalations: escalationEvents.length,
         avgCai,
+        // Telephony metrics
+        totalPhoneCalls,
+        activeCalls: queueMetrics.activeCallCount,
+        callQueueLength: queueMetrics.queueLength,
+        avgCallDurationMs,
       },
       emotions: emotionCounts,
       recentEvents: safeEvents.slice(0, 50),

@@ -9,6 +9,25 @@ export function decidePolicy(emotion: EmotionContext): PolicyDirectives {
     notes: [],
   };
 
+  // FR-18: Sustained negativity — repeated frustration + high intensity = immediate human escalation
+  // Covers "3+ consecutive angry/sad turns → escalate" (SRD FR-18, Sprint 2)
+  if (
+    emotion.flags.repeated_frustration &&
+    emotion.flags.increasing_distress &&
+    emotion.current.intensity > 0.7
+  ) {
+    directives.acknowledgeFirst = true;
+    directives.pace = "slow";
+    directives.allowUpsell = false;
+    directives.escalate = "human";
+    directives.safetyScript =
+      "Immediately offer to connect the caller to a human specialist. Do not attempt to resolve this yourself.";
+    directives.notes.push(
+      "SUSTAINED NEGATIVITY: repeated frustration + increasing distress + high intensity — escalate to human NOW."
+    );
+    return directives;
+  }
+
   if (emotion.flags.increasing_distress || emotion.current.label === "distress") {
     directives.acknowledgeFirst = true;
     directives.pace = "slow";
@@ -32,6 +51,8 @@ export function decidePolicy(emotion: EmotionContext): PolicyDirectives {
     directives.acknowledgeFirst = true;
     directives.pace = "slow";
     directives.allowUpsell = false;
+    // High-intensity anger escalates to human directly
+    directives.escalate = emotion.current.intensity > 0.75 ? "tier2" : "none";
     directives.notes.push("Anger detected — lead with acknowledgement; avoid defensive language.");
     return directives;
   }
@@ -49,6 +70,7 @@ export function decidePolicy(emotion: EmotionContext): PolicyDirectives {
 
   return directives;
 }
+
 
 export function policyToPrompt(d: PolicyDirectives): string {
   const parts = [

@@ -64,4 +64,11 @@ export const CONFIG = {
     maxFileSizeBytes: 5 * 1024 * 1024,
     allowedMimeTypes: ["text/plain", "application/pdf"] as string[],
   },
+  telephony: {
+    // FR-19: Max concurrent calls before queue/reject logic kicks in
+    maxConcurrentCalls: 10,
+    // Twilio mulaw audio spec (do not change — Twilio always sends 8kHz mulaw)
+    sampleRate: 8000,
+    encoding: "mulaw" as const,
+  },
 } as const;

@@ -12,6 +12,11 @@ interface AnalyticsData {
     cancelledBookings: number;
     escalations: number;
     avgCai: number;
+    // Telephony (Sprint 1)
+    totalPhoneCalls: number;
+    activeCalls: number;
+    callQueueLength: number;
+    avgCallDurationMs: number;
   };
   emotions: Record<string, number>;
   recentEvents: Array<{
@@ -83,14 +88,47 @@ export default function AnalyticsDashboard() {
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-10">
-        <KpiCard label="Total Calls" value={m.totalCalls} color="text-[var(--color-accent-cyan)]" />
+      {/* KPI Cards — Core */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <KpiCard label="Total Sessions" value={m.totalCalls} color="text-[var(--color-accent-cyan)]" />
         <KpiCard label="Tool Calls" value={m.totalToolInvocations} color="text-[var(--color-accent-violet)]" />
         <KpiCard label="Escalations" value={m.escalations} color="text-amber-400" />
         <KpiCard label="Active Bookings" value={m.activeBookings} color="text-emerald-400" />
         <KpiCard label="Cancelled" value={m.cancelledBookings} color="text-red-400" />
         <KpiCard label="Avg CAI" value={m.avgCai} color="text-[var(--color-text-primary)]" suffix="/100" />
+      </div>
+
+      {/* Telephony KPI Cards — Sprint 1 */}
+      <div className="mb-10">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <h2 className="text-[12px] font-mono font-bold text-[var(--color-text-secondary)] uppercase tracking-widest">Live Telephony</h2>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KpiCard
+            label="Phone Calls"
+            value={m.totalPhoneCalls ?? 0}
+            color="text-[var(--color-accent-cyan)]"
+          />
+          <KpiCard
+            label="Active Calls"
+            value={m.activeCalls ?? 0}
+            color="text-emerald-400"
+            live
+          />
+          <KpiCard
+            label="Queue Length"
+            value={m.callQueueLength ?? 0}
+            color="text-amber-400"
+            live
+          />
+          <KpiCard
+            label="Avg Duration"
+            value={m.avgCallDurationMs ? Math.round((m.avgCallDurationMs ?? 0) / 1000) : 0}
+            color="text-[var(--color-accent-violet)]"
+            suffix="s"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -178,9 +216,15 @@ export default function AnalyticsDashboard() {
   );
 }
 
-function KpiCard({ label, value, color, suffix }: { label: string; value: number; color: string; suffix?: string }) {
+function KpiCard({ label, value, color, suffix, live }: { label: string; value: number; color: string; suffix?: string; live?: boolean }) {
   return (
-    <div className="bg-[var(--color-bg-elevated)] rounded-2xl border border-[var(--color-border-subtle)] p-6 transition-all hover:-translate-y-1 hover:shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+    <div className="bg-[var(--color-bg-elevated)] rounded-2xl border border-[var(--color-border-subtle)] p-6 transition-all hover:-translate-y-1 hover:shadow-[0_10px_30px_rgba(0,0,0,0.5)] relative overflow-hidden">
+      {live && (
+        <span className="absolute top-3 right-3 flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[9px] font-mono text-emerald-400 uppercase tracking-widest">Live</span>
+        </span>
+      )}
       <h3 className="text-[11px] font-mono font-bold text-[var(--color-text-secondary)] uppercase tracking-widest mb-3">{label}</h3>
       <p className={`font-display text-4xl font-extrabold ${color}`}>
         {typeof value === "number" && !Number.isInteger(value) ? value.toFixed(1) : value}
