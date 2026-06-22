@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 const MULAW_DECODE_TABLE: number[] = (() => {
   const table: number[] = new Array(256);
   for (let i = 0; i < 256; i++) {
-    let u = ~i;
+    const u = ~i;
     const sign = u & 0x80;
     const exponent = (u >> 4) & 0x07;
     let mantissa = u & 0x0f;
