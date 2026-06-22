@@ -1,5 +1,6 @@
 import type { EmotionContext, MemoryRecord, PolicyDirectives, RetrievedContext, Utterance } from "../types";
 import { policyToPrompt } from "./policy";
+import { getEmotionPersona, formatPersonaBlock } from "../emotion/persona";
 
 // Character-based budget approximation. Assumes ~4 chars/token.
 const BUDGET_CHARS = 24000;
@@ -30,12 +31,21 @@ export function buildLLMContext(args: {
   const policyBlock = policyToPrompt(policy);
   const stmBlock = truncate(formatStm(retrieved.stm, userTurn.id), 8000);
 
+  // FR-11: Build dynamic emotion persona for this turn
+  const persona = getEmotionPersona(emotion);
+  const personaBlock = formatPersonaBlock(persona, emotion);
+
   const system = [
-    "You are an emotion-adaptive voice agent. You MUST follow these rules:",
-    "1. Answer ONLY using the evidence block + STM. If the answer is not grounded there, say you do not have that information and offer next steps.",
+    "You are VOXERA, an AI voice receptionist. You MUST follow ALL of the rules below:",
+    "",
+    "=== EMOTIONAL PERSONA (HIGHEST PRIORITY) ===",
+    personaBlock,
+    "",
+    "=== CORE RULES ===",
+    "1. Answer ONLY using the EVIDENCE block + STM. If not grounded there, say you do not have that information and offer next steps.",
     "2. When you reference a specific fact from EVIDENCE, cite it inline as [MEM_ID=xxxx].",
-    "3. Obey the POLICY directives exactly, especially pacing, acknowledgement, and escalation.",
-    "4. Keep voice-style: short sentences, natural prosody, ≤ 3 sentences unless the user asked for detail.",
+    "3. Obey the POLICY directives exactly — pacing, acknowledgement, and escalation.",
+    "4. Voice-style: short sentences, natural prosody, ≤ 3 sentences unless detail was requested.",
     "5. Never invent ticket numbers, dates, account details, or policy facts.",
     "",
     clientBlock,

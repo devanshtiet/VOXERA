@@ -76,6 +76,16 @@ export class CallQueueManager {
   public getQueueLength(): number {
     return this.queue.length;
   }
+
+  /**
+   * Returns a snapshot of live telephony metrics for the analytics dashboard.
+   */
+  public getMetrics(): { activeCallCount: number; queueLength: number } {
+    return {
+      activeCallCount: this.activeCalls,
+      queueLength: this.queue.length,
+    };
+  }
 }
 
 // Global singleton for use across the application
