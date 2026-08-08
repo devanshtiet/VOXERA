@@ -2,10 +2,12 @@ import { nanoid } from "nanoid";
 import { CONFIG } from "../config";
 import { buildEmotionContext } from "../emotion/context";
 import { detectTextEmotion, fuseEmotion } from "../emotion/detect";
+import { detectTextEmotionML } from "../emotion/ml-detect";
 import { detectAudioEmotion } from "../emotion/audio-emotion";
 import { importanceScore, novelty, policyFlag, taskCriticality } from "../emotion/importance";
 import { calculateCAI, type CAIResult } from "../emotion/cai";
 import { logSessionEvent, makeEvent } from "../logging/session-logger";
+import { emitSessionEvent } from "../realtime/emitter";
 import { retrieve, topScore } from "../memory/retrieval";
 import { stm } from "../memory/stm";
 import { vectorStore } from "../memory/store";
@@ -104,7 +106,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   }
 
   // ── Issue #14: Acoustic Emotion Analysis ────────────────────────────────
-  const textEmo = detectTextEmotion(input.transcript);
+  const textEmo = await detectTextEmotionML(input.transcript);
   const audioEmo = input.acousticFeatures
     ? detectAudioEmotion(input.acousticFeatures)
     : (input.audioEmotion ?? null);
@@ -153,8 +155,13 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     text: userTurn.text,
     sttConfidence: sttConf,
   }));
+  void emitSessionEvent(input.sessionId, "transcript", {
+    role: "user",
+    text: userTurn.text,
+    sttConfidence: sttConf,
+  });
 
-  void logSessionEvent(makeEvent(evBase, "emotion", {
+  const emotionData = {
     label: fused.label,
     intensity: fused.intensity,
     confidence: fused.confidence,
@@ -163,7 +170,9 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     trajectory: emotionCtx.trajectory,
     zDeviation: emotionCtx.zDeviation,
     flags: emotionCtx.flags,
-  }));
+  };
+  void logSessionEvent(makeEvent(evBase, "emotion", emotionData));
+  void emitSessionEvent(input.sessionId, "emotion", emotionData);
 
   // Issue #14: Use real acoustic metrics for CAI when available, fall back to heuristics
   const responseLength = input.transcript.split(/\s+/).length;
@@ -189,11 +198,13 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     }));
   }
 
-  void logSessionEvent(makeEvent(evBase, "cai", {
+  const caiData = {
     score: cai.score,
     category: cai.category,
-    explanation: cai.explanation
-  }));
+    explanation: cai.explanation,
+  };
+  void logSessionEvent(makeEvent(evBase, "cai", caiData));
+  void emitSessionEvent(input.sessionId, "cai", caiData);
 
   const I = importanceScore({
     text: input.transcript,
@@ -288,6 +299,10 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     ts: Date.now(),
   };
   await stm.push(input.sessionId, agentTurn, input.clientId);
+  void emitSessionEvent(input.sessionId, "transcript", {
+    role: "agent",
+    text: guarded.cleaned,
+  });
 
   void logSessionEvent(makeEvent(evBase, "guard", {
     ok: guarded.ok,

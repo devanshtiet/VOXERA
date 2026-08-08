@@ -94,3 +94,24 @@ export function buildEnqueueTwiml(queueName: string): string {
   response.enqueue(queueName);
   return response.toString();
 }
+
+export async function initiateOutboundCall(opts: {
+  to: string;
+  from?: string;
+  webhookUrl: string;
+}): Promise<{ callSid: string; status: string }> {
+  const client = getTwilioClient();
+  const fromNumber = opts.from || process.env.TWILIO_PHONE_NUMBER;
+
+  if (!fromNumber || fromNumber === "your_twilio_phone_number_here") {
+    throw new Error("Valid TWILIO_PHONE_NUMBER is required for outbound calls.");
+  }
+
+  const call = await client.calls.create({
+    to: opts.to,
+    from: fromNumber,
+    url: opts.webhookUrl,
+  });
+
+  return { callSid: call.sid, status: call.status };
+}
