@@ -60,7 +60,7 @@ describe("Emotion Detection Lexicon & Calibration Suite (Issue #23)", () => {
     it("fuses text and audio emotion signals correctly", () => {
       const textSig = detectTextEmotion("i am angry");
       const audioSig = {
-        label: "sadness",
+        label: "sadness" as const,
         intensity: 0.5,
         confidence: 0.8,
         confidenceCategory: { level: "high", explanation: "Mock" },

@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { DeepgramLiveWrapper } from "../deepgram/live";
 import { synthesizeLinear16 } from "../deepgram/tts";
 import { handleTurn } from "../agent/orchestrator";
+import type { EmotionLabel } from "../types";
 import { supabase } from "../db/supabase";
 import { callQueue } from "../queue/manager";
 import { stm } from "../memory/stm";
@@ -216,7 +217,7 @@ export class TelephonyStreamHandler {
       });
  
       console.log(`[TelephonyStream] Reply (${this.callSid}): "${output.reply}"`);
-      await this.speakToTwilio(output.reply);
+      await this.speakToTwilio(output.reply, output.trace.emotion.current.label);
     } catch (err) {
       console.error(`[TelephonyStream] handleTurn error:`, err);
     } finally {
@@ -230,14 +231,14 @@ export class TelephonyStreamHandler {
   /**
    * Converts text → Linear16 PCM → G.711 μ-law → sends back to the Twilio Media Stream.
    */
-  private async speakToTwilio(text: string) {
+  private async speakToTwilio(text: string, emotionLabel?: EmotionLabel) {
     if (!this.streamSid || this.ws.readyState !== WebSocket.OPEN) return;
  
     try {
       // Get raw 8kHz Linear16 PCM directly from Deepgram (or the tenant's
       // custom ElevenLabs voice, if configured) — already in the exact
       // format pcmToMulaw expects, no decoding required.
-      const pcmBytes = await synthesizeLinear16(text, { clientId: this.clientId });
+      const pcmBytes = await synthesizeLinear16(text, { clientId: this.clientId, emotion: emotionLabel });
       const mulawAudio = pcmToMulaw(pcmBytes);
       const base64Audio = mulawAudio.toString("base64");
  

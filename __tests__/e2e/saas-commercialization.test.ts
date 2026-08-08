@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createCheckoutSession, getSubscription, enforceLimit } from "../../lib/billing/stripe";
 
-// Mock stripe SDK and DB client for testing without real credentials
-vi.mock("../../lib/billing/stripe", async (importOriginal) => {
-  const actual: any = await importOriginal();
+// Mock stripe functions for testing without real credentials
+vi.mock("../../lib/billing/stripe", () => {
   return {
-    ...actual,
     createCheckoutSession: vi.fn(),
     getSubscription: vi.fn(),
     enforceLimit: vi.fn(),

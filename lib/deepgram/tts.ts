@@ -1,8 +1,9 @@
 import { CONFIG } from "../config";
-import type { PolicyDirectives } from "../types";
+import type { EmotionLabel, PolicyDirectives } from "../types";
 import { getDeepgram } from "./client";
 import { supabase } from "../db/supabase";
 import { synthesizeElevenLabs } from "../tts/voice-clone";
+import { applyEmotionProsody, getEmotionTTSParams } from "../emotion/tts-params";
 
 // Resolve voice settings for client
 async function getClientVoiceSettings(clientId?: string): Promise<{ provider?: string; voiceId?: string } | null> {
@@ -37,6 +38,7 @@ export async function synthesize(text: string, opts?: {
   policy?: PolicyDirectives;
   persona?: string;
   clientId?: string;
+  emotion?: EmotionLabel;
 }): Promise<Uint8Array> {
   const settings = await getClientVoiceSettings(opts?.clientId);
   
@@ -44,8 +46,6 @@ export async function synthesize(text: string, opts?: {
   if (settings?.provider === "elevenlabs" && settings.voiceId) {
     try {
       const pcm = await synthesizeElevenLabs(text, settings.voiceId);
-      // synthesize returns mp3 (Uint8Array) for the web client, but since synthesizeElevenLabs returns raw pcm,
-      // in mock/dev it is acceptable. For simplicity, return the PCM buffer directly.
       return new Uint8Array(pcm);
     } catch (err) {
       console.warn("[TTS] ElevenLabs synthesis failed, falling back to Deepgram:", err);
@@ -53,12 +53,15 @@ export async function synthesize(text: string, opts?: {
   }
 
   const dg = getDeepgram();
-  const shaped = applyProsody(text, opts?.policy);
-  
+  const emotionParams = getEmotionTTSParams(opts?.emotion);
+  let shaped = applyEmotionProsody(text, emotionParams);
+  if (opts?.policy) {
+    shaped = applyProsody(shaped, opts.policy);
+  }
+
   const personaConfig = opts?.persona ? CONFIG.deepgram.voicePersonas[opts.persona as keyof typeof CONFIG.deepgram.voicePersonas] : undefined;
   const model = personaConfig?.model || CONFIG.deepgram.ttsModel;
 
-  // Retry TTS up to 2 times on transient failures (502/503/network errors)
   const MAX_TTS_RETRIES = 2;
   let lastErr: unknown;
 
@@ -91,6 +94,7 @@ export async function synthesizeLinear16(text: string, opts?: {
   policy?: PolicyDirectives;
   persona?: string;
   clientId?: string;
+  emotion?: EmotionLabel;
 }): Promise<Buffer> {
   const settings = await getClientVoiceSettings(opts?.clientId);
 
@@ -103,7 +107,11 @@ export async function synthesizeLinear16(text: string, opts?: {
   }
 
   const dg = getDeepgram();
-  const shaped = applyProsody(text, opts?.policy);
+  const emotionParams = getEmotionTTSParams(opts?.emotion);
+  let shaped = applyEmotionProsody(text, emotionParams);
+  if (opts?.policy) {
+    shaped = applyProsody(shaped, opts.policy);
+  }
 
   const personaConfig = opts?.persona ? CONFIG.deepgram.voicePersonas[opts.persona as keyof typeof CONFIG.deepgram.voicePersonas] : undefined;
   const model = personaConfig?.model || CONFIG.deepgram.ttsModel;
@@ -119,8 +127,7 @@ export async function synthesizeLinear16(text: string, opts?: {
   return Buffer.from(buf);
 }
 
-// Light prosody adaptation: under slow pacing, insert subtle pauses and
-// keep sentences short.
+// Light prosody adaptation: under slow pacing, insert subtle pauses and keep sentences short.
 function applyProsody(text: string, policy?: PolicyDirectives): string {
   if (!policy || policy.pace !== "slow") return text;
   return text.replace(/([\.!?])\s+/g, "$1  ");

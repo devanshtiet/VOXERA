@@ -14,6 +14,8 @@ import {
   Award
 } from "lucide-react";
 import Link from "next/link";
+import { LiveCallMonitor } from "@/components/admin/LiveCallMonitor";
+import { OutboundCallModal } from "@/components/admin/OutboundCallModal";
 
 interface AnalyticsData {
   metrics: {
@@ -130,11 +132,17 @@ export default function AnalyticsDashboard() {
           <h1 className="font-display text-3xl md:text-4xl font-extrabold tracking-tight text-gradient">VOXERA Dashboard</h1>
           <p className="text-[var(--color-text-secondary)] mt-2 text-[15px]">Real-time Analytics & Operational Monitoring</p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] text-[11px] font-mono text-[var(--color-accent-cyan)] shrink-0 w-fit">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          SYSTEM LIVE
+        <div className="flex items-center gap-3">
+          <OutboundCallModal />
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] text-[11px] font-mono text-[var(--color-accent-cyan)] shrink-0 w-fit">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            SYSTEM LIVE
+          </div>
         </div>
       </header>
+
+      {/* Real-time SSE Live Call & Emotion Stream Monitor */}
+      <LiveCallMonitor />
 
       {/* Setup Checklist (For new users) */}
       {m.totalCalls === 0 && (

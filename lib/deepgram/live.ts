@@ -116,7 +116,7 @@ export class DeepgramLiveWrapper {
   }
 
   public sendAudio(buffer: Uint8Array | Buffer): void {
-    if (this.state === "connected" && this.live && this.live.readyState === 1 /* OPEN */) {
+    if (this.state === "connected" && this.live && (this.live.readyState === 1 || this.live.socket?.readyState === 1)) {
       this.live.sendMedia(buffer);
     } else if (this.state === "connecting") {
       // Buffer audio during reconnection so we don't lose caller speech
