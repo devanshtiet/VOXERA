@@ -109,20 +109,26 @@ All core features are implemented, tested, and fully integrated:
 * **Purpose**: Dynamically adjusts agent speaking tone, policies, and safeguards based on the caller's feeling states.
 * **Implementation Logic**:
   - Classifies caller mood into one of 11 labels: `neutral`, `frustration`, `anger`, `sadness`, `distress`, `fear`, `confusion`, `joy`, `gratitude`, `excitement`, `disappointment`.
-  - Uses a **Hybrid Text-Emotion Engine**: Combines a deep learning ML classification model (HuggingFace DistilRoBERTa) with a deterministic fallback lexicon. This allows the system to accurately detect sarcasm and complex language while maintaining a zero-lag fallback circuit.
+  - **Concurrent Text-Emotion Router** (`detectTextEmotion()` in `detect.ts`): runs the remote HuggingFace engine (`detectTextEmotionHF`, `ml-detect.ts`) and the deterministic Lexicon engine (`detectTextEmotionLexicon`) **concurrently** via `Promise.all` — neither waits on the other. If HF returns a valid signal within its latency budget (`CONFIG.emotion.hfLatencyBudgetMs`, default 200ms, timeout covers the full fetch + JSON parse), it's used as primary; otherwise the already-computed Lexicon result is used immediately, with no blocking. Both results are always returned together (`TextEmotionResult { primary, lexicon, hf, selection }`) for diagnostic comparison.
+  - **Local ONNX Emotion Engine** (`local-onnx-detect.ts` / `local-emotion-classifier.ts`, diagnostic-only for now): a 7-class emotion model run in-process via `@xenova/transformers`, same underlying model as the remote HF path (`j-hartmann/emotion-english-distilroberta-base`, via a community ONNX conversion). Not wired into the production router yet — available for side-by-side comparison via the diagnostic layer below; promoting it to primary/replacing the remote call is a Phase 2 decision pending comparative accuracy data.
+  - **Diagnostic Instrumentation** (`emotion-debug.ts`, `runDiagnosticEmotion()`): when `CONFIG.emotion.diagnosticMode` is enabled (off by default in production to avoid extra latency/cost on live calls), every turn additionally runs HF + Lexicon + Local ONNX + Acoustic concurrently and returns a full side-by-side breakdown — label, confidence, intensity, VAD, latency, and per-engine importance/memory-tier classification — plus the exact fusion decision production made. Attached to `TurnTrace.emotionDiagnostics` and logged as an `emotion_diagnostic` session event. Manual comparison CLI: `scripts/test-emotion-diagnostic.ts`.
+  - **Confidence-aware Fusion** (`fuseEmotion()` in `detect.ts`): blends text and acoustic signals with two safeguards — a minimum-confidence floor (`CONFIG.emotion.fusionMinConfidence`, default 0.3: if both engines are effectively guessing, default to neutral rather than picking a weak winner) and a confidence margin (`CONFIG.emotion.fusionConfidenceMargin`, default 0.15: the winning engine must be meaningfully more confident, not just marginally, or text wins the tie-break). Preserves the `isMixed` flag and both individual engine signals (`textSignal`, `audioSignal`) for diagnostics.
   - **Context-aware punctuation handling**: Multiple exclamation marks (`!!`) and question marks (`???`) boost arousal in the direction of the already-detected valence, instead of blindly assuming frustration. A **positivity safety net** catches edge cases where a clearly positive message (high valence + high arousal) was incorrectly classified as a negative emotion.
   - Maps labels to structured voice configurations (`lib/emotion/persona.ts`), with 11 full persona definitions including tone instructions, forbidden phrases, opening style coaching, and example sentences.
   - Injects formatted markdown blocks at the highest priority location inside the LLM prompt.
   - Traverses the session timeline to identify sustained negative turns (3 consecutive anger/distress turns or intensity > 0.70), returning `escalate: "human"` to immediately route the caller to human staff.
 * **Files & Directories**:
-  - [lexicon.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/emotion/lexicon.ts) — 35+ keyword-to-emotion mappings with VAD offsets and weights.
-  - [detect.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/emotion/detect.ts) — Text emotion detector with context-aware punctuation and positivity safety net.
-  - [persona.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/emotion/persona.ts) — 11 full persona definitions with tone rules, warnings, and priority overrides.
-  - [ml-detect.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/emotion/ml-detect.ts) — HuggingFace API integration (`detectTextEmotionML`) with strict 200ms timeout fallback.
-  - [classifier.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/emotion/classifier.ts) — Local ML pipeline definitions using `@xenova/transformers`.
-  - [context.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/agent/context.ts) — System prompt builder incorporating emotion coach blocks.
-  - [policy.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/agent/policy.ts) — Escalation, pacing, and upsell directive engine.
-  - [audio-emotion.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/emotion/audio-emotion.ts) — Maps physical acoustic features (pitch, energy, rate, pauses) to EmotionSignal with `source: "audio"`.
+  - `lexicon.ts` — 35+ keyword-to-emotion mappings with VAD offsets and weights.
+  - `detect.ts` — Concurrent text-emotion router (`detectTextEmotion`), Lexicon engine (`detectTextEmotionLexicon`), confidence-aware fusion (`fuseEmotion`), and the unused-but-kept local sentiment fallback (`detectTextEmotionLocal`).
+  - `ml-detect.ts` — Remote HuggingFace 7-class emotion API (`detectTextEmotionHF`), independent of the Lexicon engine, full-operation latency budget.
+  - `emotion-label-map.ts` — Shared 7-class → 11-label/VAD mapping used by both the remote HF and local ONNX engines (same underlying model).
+  - `local-onnx-detect.ts` / `local-emotion-classifier.ts` — Local 7-class ONNX emotion engine (diagnostic-only), via `@xenova/transformers`.
+  - `emotion-debug.ts` — Diagnostic instrumentation (`runDiagnosticEmotion`, `DiagnosticEmotionResult`).
+  - `classifier.ts` — Local 2-class sentiment model (`@xenova/transformers`). **Not part of the production path** — documented as unused/legacy in its header comment.
+  - `persona.ts` — 11 full persona definitions with tone rules, warnings, and priority overrides.
+  - `context.ts` (`lib/agent/`) — System prompt builder incorporating emotion coach blocks.
+  - `policy.ts` (`lib/agent/`) — Escalation, pacing, and upsell directive engine.
+  - `audio-emotion.ts` — Scored multi-feature acoustic inference (see 4.10 below) mapping physical acoustic features to an `EmotionSignal` with `source: "audio"`.
 
 ### 4.4 Memory & Vector Store (RAG)
 * **Purpose**: Stores and retrieves semantic memories and client documents.
@@ -203,13 +209,20 @@ All core features are implemented, tested, and fully integrated:
 * **Implementation Logic**:
   - Operates on 8kHz mono linear16 PCM buffers accumulated during each caller speech turn.
   - **RMS Energy**: Root-mean-square amplitude via `Buffer.readInt16LE()`. Used for barge-in energy thresholds (prevents false interrupts from noise) and vocal intensity.
-  - **Zero-Crossing Rate (ZCR)**: Counts sign changes per 20ms frame. Discriminates voiced/unvoiced speech.
+  - **Zero-Crossing Rate (ZCR)**: Counts sign changes per 20ms frame. Discriminates voiced/unvoiced speech, and (see below) contributes to laughter detection.
   - **Pitch Estimation**: Autocorrelation on windowed PCM frames to estimate F0 in Hz. Returns median pitch and coefficient of variation (pitch dynamics).
+  - **Energy Modulation Rate**: Mean absolute frame-to-frame energy delta, normalized 0–1. Captures rapid amplitude oscillation characteristic of crying, sobbing, and laughter.
+  - **Pitch Contour**: Linear-regression slope over the chronologically-ordered per-frame pitch trace, classified as `rising` / `falling` / `flat` / `unstable` (high coefficient of variation). Computed from the frames in their original time order — the median/variance stats use a separately sorted copy so contour direction isn't corrupted by the sort.
   - **Speaking Rate**: Words-per-minute from transcript word count and audio duration.
   - **Pause Detection**: Scans for contiguous silence regions (RMS below threshold for >300ms). Returns pause count and total pause duration.
   - All computations are pure JavaScript — no FFT libraries, no native bindings, no external dependencies.
+  - **Scored Multi-Feature Emotion Inference** (`lib/emotion/audio-emotion.ts`, `detectAudioEmotion`): each candidate label (anger, excitement, sadness, distress, joy, frustration, confusion, fear, disappointment, neutral) accumulates a weighted score from multiple feature contributions rather than a single rigid if/else threshold. Notably:
+    - **Crying/sobbing** → `distress`: high energy modulation + elevated pitch + broken speech (pause count) + unstable pitch contour, distinguished from anger (which is high-energy but *low* pitch variation/modulation — controlled, not broken).
+    - **Laughter** → `joy`: high ZCR + rapid energy modulation + mid/high pitch — the first use of `zeroCrossingRate` in label inference (previously extracted but unused).
+  - **Confidence Ceiling**: scales with utterance duration and pattern clarity — up to `CONFIG.emotion.audioConfidenceCeiling` (0.75) for utterances under 8s, and up to `audioConfidenceCeilingLong` (0.85) for longer utterances with a clear, distinctive winning pattern (large score margin over the runner-up label). Short/ambiguous audio (<2s) stays capped near 0.3.
 * **Files & Directories**:
-  - [acoustic.ts](file:///Users/hardikkadd/Desktop/Projects/VOXERA/lib/audio/acoustic.ts) — Pure-JS DSP feature extractor.
+  - `acoustic.ts` — Pure-JS DSP feature extractor.
+  - `audio-emotion.ts` — Scored multi-feature label inference and confidence calibration.
 
 ### 4.11 Input Guardrails & AI Safety
 * **Purpose**: Pre-LLM defense layer that detects and blocks prompt injection and jailbreak attempts in voice transcripts before they reach the AI orchestrator.
@@ -336,6 +349,28 @@ CREATE TABLE public.call_logs (
 ---
 
 ## 8. Changelog
+
+### 2026-08-11 — Emotion Engine Phase 1 Integration (Issues #26–#31)
+
+**Context**: The prior "Hybrid Emotion Engine" entry below claimed a working concurrent HF+Lexicon architecture, but the orchestrator was still importing a since-renamed function (`detectTextEmotionML`), which broke `npm run build` entirely and failed 19 tests — see the corrected entry above it. This entry covers the follow-up Phase 1 work: fixing that break, then auditing and completing the remaining emotion-engine architecture against the requirements in Issues #26–#31.
+
+**Features Implemented / Verified:**
+1. **Orchestrator build-break fix**: Restored `npm run build` by pointing the orchestrator at the new concurrent `detectTextEmotion()` router instead of the removed `detectTextEmotionML` export.
+2. **Concurrent HF + Lexicon architecture (#26)**: Verified `detectTextEmotion()` runs `detectTextEmotionHF` and `detectTextEmotionLexicon` concurrently via `Promise.all`, with no circular fallback and a latency budget covering the full HF operation (fetch + JSON parsing). Added `__tests__/emotion/concurrent-engines.test.ts`.
+3. **Acoustic engine upgrade (#28)**: Verified the scored multi-feature acoustic inference (crying/sobbing → distress, laughter → joy via ZCR, recalibrated 0.75→0.85 confidence ceiling) was already implemented, and fixed a real bug found while adding test coverage: `pitchContour` was computed on the magnitude-sorted pitch array instead of the chronologically-ordered one, so it could never actually return `"falling"`. Added `__tests__/emotion/acoustic-scored-inference.test.ts`.
+4. **Emotion fusion safeguards (#29)**: Verified `fuseEmotion()`'s minimum-confidence floor and confidence-margin requirements were already implemented per spec.
+5. **Diagnostic instrumentation (#27, #30)**: Added `lib/emotion/emotion-debug.ts` (`runDiagnosticEmotion()`), which runs HF + Lexicon + a new local ONNX emotion engine + Acoustic concurrently and returns a full side-by-side comparison (label, confidence, intensity, VAD, latency, per-engine importance/memory-tier), plus the exact fusion decision production made. Wired into the orchestrator behind `CONFIG.emotion.diagnosticMode` (default off). Added `scripts/test-emotion-diagnostic.ts` (CLI) and `__tests__/emotion/emotion-diagnostic.test.ts`.
+6. **New local ONNX emotion engine**: Added `lib/emotion/local-onnx-detect.ts` / `local-emotion-classifier.ts`, a 7-class local emotion model via `@xenova/transformers` (community ONNX conversion of the same `j-hartmann/emotion-english-distilroberta-base` model already used remotely). Diagnostic-only — not wired into the production router. Fixed a real tokenizer compatibility bug in the process: this conversion's `tokenizer.json` serializes BPE merges as `[a, b]` pairs (a newer `tokenizers` library format) but the installed `@xenova/transformers@2.17.2` expects `"a b"` strings; worked around by pre-patching the cached tokenizer.json before the pipeline loads it.
+7. **`classifier.ts` disposition**: Kept in place (not removed), header comment now explicitly documents it as unused legacy code — the production path uses the HF/Lexicon/Local-ONNX engines above, not this 2-class sentiment model.
+
+**Validation Performed:**
+- `npx tsc --noEmit` → 0 errors
+- `npx vitest run` → 243 tests passed, 0 failures across 25 files
+- `npm run lint` → 0 errors, 0 warnings
+- `npm run build` → succeeded
+- Manual diagnostic CLI validation (`scripts/test-emotion-diagnostic.ts`) against the real downloaded local ONNX model, covering the representative cases from Issue #31 ("I'm feeling low", "I'm fine", "I can't believe you did that", "Great. Just great.") and the acoustic validation scenario from Issue #28 (crying child, neutral wording) — engines disagree in exactly the ways expected (e.g. sarcasm fools both the lexicon and the local ONNX model; the acoustic engine alone correctly resolves the crying scenario to `distress`).
+
+**Explicitly not done (Phase 2, per Issues #26/#28/#29/#31 scope boundaries)**: final HF vs. Lexicon vs. Local-ONNX selection/fusion architecture, cross-modal text+acoustic mathematical fusion, ≥95% accuracy evaluation against a labeled dataset, replacing the remote HF call with the local ONNX model in production.
 
 ### 2026-08-11 — Hybrid Emotion Engine & Telephony Integration
 

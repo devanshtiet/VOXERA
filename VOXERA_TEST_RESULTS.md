@@ -4,6 +4,24 @@ This document records the exact test suites, validation steps, and outcomes for 
 
 ---
 
+## 2026-08-11 — Issue #31: Emotion Engine Phase 1 Integration (PR #TBD)
+**Status:** ✅ VERIFIED
+**Key Technologies:** HuggingFace Inference API, @xenova/transformers (ONNX), Vitest, TypeScript
+
+**Validation Steps:**
+1. **PR Integration:** Combined the build-break fix + Issue #26/#28 work (previously landed) with the new Issue #27/#29/#30 diagnostic instrumentation and local ONNX engine work into a single integration branch. No merge conflicts (the branches were already linear/stacked, not divergent).
+2. **Architecture Audit vs. `VOXERA_IMPLEMENTATION.md`:** Verified each Phase 1 requirement against actual code, not assumptions: concurrent HF+Lexicon execution (`detectTextEmotion()`, `Promise.all`), full-operation HF latency budget, no circular fallback, scored acoustic inference with crying/laughter detection, fusion confidence threshold + margin, diagnostic instrumentation (`emotion-debug.ts`, `emotionDiagnostics` on `TurnTrace`, `emotion_diagnostic` session event). All confirmed present and correctly wired.
+3. **Diagnostic CLI Validation:** Ran `scripts/test-emotion-diagnostic.ts` against the real (downloaded) local ONNX model with the representative cases from Issue #31 ("I'm feeling low", "I'm fine", "I can't believe you did that", "Great. Just great.") plus the sarcasm and Issue #28 crying-child scenarios. Engines disagree in exactly the expected ways (e.g., sarcasm fools the lexicon and the local ONNX model alike; only the acoustic engine correctly resolves the crying scenario to `distress`).
+4. **Documentation Sync:** Updated `VOXERA_IMPLEMENTATION.md` §4.3 and §4.10 to describe the actual current architecture (was still referencing the removed `detectTextEmotionML` name and pre-DSP heuristic acoustic approximations). Updated `VOXERA_ROADMAP.md`'s Module Status Dashboard and §4.3/§5.2 milestones to reflect verified Phase 1 completion, keeping fusion/model-selection finalization under Phase 2.
+
+**E2E Test Execution:**
+- `npx tsc --noEmit` → **0 errors**
+- `npx vitest run` → **243 tests passed, 0 failures** across 25 test files (includes `concurrent-engines.test.ts`, `acoustic-scored-inference.test.ts`, `emotion-diagnostic.test.ts`)
+- `npm run lint` → **0 errors, 0 warnings**
+- `npm run build` → **Build succeeded**
+
+---
+
 ## 2026-08-11 — Fix: Hybrid Emotion Engine Build Break (post-"phase 1 initially")
 **Status:** ✅ VERIFIED
 **Key Technologies:** TypeScript, Vitest, Next.js/Turbopack
