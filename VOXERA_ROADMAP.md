@@ -102,9 +102,14 @@ The next phases of development will transition the codebase from a highly comple
 * [x] Implement interruption triggers to halt agent TTS output immediately if user speech is detected. (Issue #14)
 * [x] Externalize circuit breaker state to Redis for multi-node deployments. (Issue #13)
 * [x] Implement adaptive memory importance scoring, time-decay, and retrieval explainability. (Issue #9/17)
-* [ ] Replace lexicon-based emotion detection with a trained ML model (RoBERTa or similar) via the existing `detectTextEmotion` interface.
+* [x] Replace lexicon-based emotion detection with a trained ML model (RoBERTa or similar) via the `detectTextEmotionML` hybrid engine interface.
 
 ### 5.3 Phase III: SaaS Portal (Weeks 6 - 10)
 * [x] Build Stripe subscription hooks and checkout routes.
 * [x] Develop the admin onboarding registration wizard.
 * [ ] Implement Super-Admin usage and monitoring panels.
+
+### 5.4 Phase IV: Production & AWS Deployment (Weeks 11+)
+* [ ] Finalize AWS hosting architecture (ECS / EC2).
+* [ ] Setup CI/CD pipelines (GitHub Actions) for automatic deployment.
+* [ ] Productionize RDS and ElastiCache connections.
