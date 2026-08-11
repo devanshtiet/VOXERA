@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "../../lib/db/server";
 import Link from "next/link";
 import { LayoutDashboard, MessageSquare, Database, Settings, LogOut, Sparkles, Users, PhoneCall } from "lucide-react";
+import { AdminMobileNav } from "../../components/admin/AdminMobileNav";
 
 export default async function AdminLayout({
   children,
@@ -57,16 +58,8 @@ export default async function AdminLayout({
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
-        {/* Mobile Header */}
-        <div className="md:hidden flex items-center justify-between p-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-          <Link href="/" className="font-display font-bold text-xl text-gradient">
-            VOXERA
-          </Link>
-          <form action="/api/auth/logout" method="POST">
-            <button type="submit" className="text-[12px] font-semibold text-red-400">Logout</button>
-          </form>
-        </div>
-        
+        <AdminMobileNav userEmail={user.email ?? ""} />
+
         {children}
       </main>
     </div>

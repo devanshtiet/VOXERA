@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { useState } from "react";
-import { Mic, PhoneCall, BarChart3, Shield, Calendar, Brain, Check, ChevronRight } from "lucide-react";
+import { Mic, PhoneCall, BarChart3, Shield, Calendar, Brain, Check, ChevronRight, Menu, X } from "lucide-react";
 
 /* ─── Shared animation presets ───────────────────────────────────────────── */
 const fadeUp = {
@@ -34,7 +34,16 @@ export default function LandingPage() {
 /* ─────────────────────────────────────────────────────────────────────────── */
 /* 1. NAVBAR                                                                   */
 /* ─────────────────────────────────────────────────────────────────────────── */
+const NAV_ANCHOR_LINKS = [
+  { label: "Features", href: "#features" },
+  { label: "Blog", href: "#blog" },
+  { label: "Contact", href: "#contact" },
+];
+
 function LandingNav() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const closeMobile = () => setMobileOpen(false);
+
   return (
     <header className="lp-nav">
       <div className="lp-nav-inner">
@@ -44,16 +53,43 @@ function LandingNav() {
           <span className="lp-logo-wordmark">Voxera</span>
         </Link>
 
-        {/* Nav links */}
+        {/* Nav links (desktop) */}
         <nav className="lp-nav-links">
-          {[["Features", "#features"], ["Blog", "#blog"], ["Contact", "#contact"]].map(([label, href]) => (
+          {NAV_ANCHOR_LINKS.map(({ label, href }) => (
             <a key={label} href={href} className="lp-nav-link">{label}</a>
           ))}
+          <Link href="/demo" className="lp-nav-link">Live Demo</Link>
         </nav>
 
-        {/* CTA */}
-        <Link href="/signup" className="lp-nav-cta">Get Template</Link>
+        {/* Actions (desktop) */}
+        <div className="lp-nav-actions">
+          <Link href="/login" className="lp-nav-login">Log In</Link>
+          <Link href="/signup" className="lp-nav-cta">Get Started</Link>
+        </div>
+
+        {/* Mobile menu toggle */}
+        <button
+          type="button"
+          className="lp-nav-burger"
+          onClick={() => setMobileOpen((o) => !o)}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+        >
+          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
       </div>
+
+      {/* Mobile menu panel */}
+      {mobileOpen && (
+        <nav className="lp-nav-mobile-panel">
+          {NAV_ANCHOR_LINKS.map(({ label, href }) => (
+            <a key={label} href={href} className="lp-nav-mobile-link" onClick={closeMobile}>{label}</a>
+          ))}
+          <Link href="/demo" className="lp-nav-mobile-link" onClick={closeMobile}>Live Demo</Link>
+          <Link href="/login" className="lp-nav-mobile-link" onClick={closeMobile}>Log In</Link>
+          <Link href="/signup" className="lp-nav-cta lp-nav-mobile-cta" onClick={closeMobile}>Get Started</Link>
+        </nav>
+      )}
     </header>
   );
 }
@@ -95,9 +131,13 @@ function HeroSection() {
 
         {/* CTA */}
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.26, ease: "easeOut" }}>
+          transition={{ duration: 0.6, delay: 0.26, ease: "easeOut" }}
+          className="lp-hero-cta-row">
           <Link href="/signup" className="lp-cta-btn">
             Get Started Free <ChevronRight size={15} strokeWidth={2.5} />
+          </Link>
+          <Link href="/demo" className="lp-cta-secondary">
+            Try Live Demo
           </Link>
         </motion.div>
       </div>
@@ -386,7 +426,7 @@ function TestimonialsSection() {
 /* ─────────────────────────────────────────────────────────────────────────── */
 function TrendingSection() {
   return (
-    <section className="lp-trending-section">
+    <section id="pricing" className="lp-trending-section">
       <div className="lp-section-container">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger}
           className="lp-trending-header">
@@ -447,8 +487,14 @@ function LandingFooter() {
           <span className="lp-logo-wordmark" style={{ fontSize: 15 }}>Voxera</span>
         </div>
         <div className="lp-footer-links">
-          {["Features", "Pricing", "Blog", "Docs", "Privacy", "Terms"].map(l => (
-            <a key={l} href="#" className="lp-footer-link">{l}</a>
+          {[
+            { label: "Features", href: "#features" },
+            { label: "Pricing", href: "#pricing" },
+            { label: "Blog", href: "#blog" },
+            { label: "Contact", href: "#contact" },
+            { label: "Live Demo", href: "/demo" },
+          ].map(l => (
+            <a key={l.label} href={l.href} className="lp-footer-link">{l.label}</a>
           ))}
         </div>
         <p className="lp-footer-copy">© 2026 VOXERA. All rights reserved.</p>
