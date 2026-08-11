@@ -1,3 +1,16 @@
+/**
+ * NOT PART OF THE PRODUCTION EMOTION PATH.
+ *
+ * This is a local 2-class sentiment model (POSITIVE/NEGATIVE only — it cannot
+ * distinguish anger from sadness from fear). It backs `detectTextEmotionLocal()`
+ * in lib/emotion/detect.ts, which nothing in the production orchestrator calls
+ * (the router in detect.ts only runs the remote HF 7-class model and the
+ * Lexicon engine — see detectTextEmotion()).
+ *
+ * Kept in place as a possible future tertiary fallback / sentiment sanity-check,
+ * not removed. For real local emotion classification, see
+ * lib/emotion/local-emotion-classifier.ts (7-class ONNX model).
+ */
 import { pipeline, env, TextClassificationPipeline } from '@xenova/transformers';
 
 // Configure environment for Node.js

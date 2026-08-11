@@ -43,6 +43,9 @@ next-env.d.ts
 # session logs & local data
 /data/
 
+# local ML model cache (downloaded on first use, not vendored)
+/.cache/
+
 # planning files (local only)
 VOXERA_IMPLEMENTATION_ROADMAP.md
 VOXERA_USER_SETUP_GUIDE.md

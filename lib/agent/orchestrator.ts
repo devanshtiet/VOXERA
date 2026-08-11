@@ -5,6 +5,7 @@ import { detectTextEmotion, fuseEmotion } from "../emotion/detect";
 import { detectAudioEmotion } from "../emotion/audio-emotion";
 import { importanceScore, novelty, policyFlag, taskCriticality } from "../emotion/importance";
 import { calculateCAI, type CAIResult } from "../emotion/cai";
+import { runDiagnosticEmotion, type DiagnosticEmotionResult } from "../emotion/emotion-debug";
 import { logSessionEvent, makeEvent } from "../logging/session-logger";
 import { emitSessionEvent } from "../realtime/emitter";
 import { retrieve, topScore } from "../memory/retrieval";
@@ -52,6 +53,8 @@ export interface TurnTrace {
   cai?: CAIResult;
   inputGuardResult?: InputGuardResult;
   acousticFeatures?: AcousticFeatures;
+  /** Present only when CONFIG.emotion.diagnosticMode is on — full HF/Lexicon/Local ONNX/Acoustic comparison. */
+  emotionDiagnostics?: DiagnosticEmotionResult;
 }
 
 export interface TurnOutput {
@@ -143,11 +146,26 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   const ltmUserAll = ltmUserResults.map((r) => r.rec);
   const mtmExisting = mtmSearchResults.map((r) => r.rec);
 
+  const sttHistory = await stm.get(input.sessionId);
   const emotionCtx = buildEmotionContext({
     current: fused,
-    stm: await stm.get(input.sessionId),
+    stm: sttHistory,
     ltmUser: ltmUserAll,
   });
+
+  // ── Phase 1 diagnostic instrumentation (off by default, see CONFIG.emotion.diagnosticMode) ──
+  let emotionDiagnostics: DiagnosticEmotionResult | undefined;
+  if (CONFIG.emotion.diagnosticMode) {
+    try {
+      emotionDiagnostics = await runDiagnosticEmotion(input.transcript, input.acousticFeatures, {
+        stm: sttHistory,
+        ltmUser: ltmUserAll,
+      });
+      void logSessionEvent(makeEvent(evBase, "emotion_diagnostic", emotionDiagnostics as unknown as Record<string, unknown>));
+    } catch (err) {
+      console.warn("[Orchestrator] emotion diagnostic run failed:", err);
+    }
+  }
 
   void logSessionEvent(makeEvent(evBase, "utterance", {
     utteranceId: userTurn.id,
@@ -337,6 +355,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
       cai,
       inputGuardResult: inputGuard,
       acousticFeatures: input.acousticFeatures,
+      emotionDiagnostics,
     },
   };
 }

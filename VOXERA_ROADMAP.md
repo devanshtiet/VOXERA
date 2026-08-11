@@ -28,7 +28,7 @@ The next phases of development will transition the codebase from a highly comple
 | :--- | :--- | :--- | :--- | :--- |
 | **Multi-Tenant Isolation** | 🟢 Complete | High | 100% | RLS policies implemented using auth.uid(). |
 | **Telephony & WebSockets** | 🟢 Complete | Medium | 100% | Queue is now backed by Redis sorted sets; fully scaled via Pub/Sub. |
-| **Speech Emotion (SER)** | ✅ Stable | Medium | 98% | Expanded to 11 labels, 35+ lexicon entries, context-aware punctuation, positivity safety net. CI lint and build issues resolved. |
+| **Speech Emotion (SER)** | 🟢 Complete (Phase 1) | Medium | 100% | Concurrent HF+Lexicon architecture, scored acoustic inference (crying/laughter detection), confidence-aware fusion, and full diagnostic instrumentation (per-engine comparison, diagnostic CLI) all verified. Local ONNX engine added (diagnostic-only). Final fusion/model-selection architecture is Phase 2. |
 | **Memory (Vector Store)** | 🟢 Complete | High | 100% | Circuit breaker, compound indexes, and adaptive importance decay with chronological explainability. |
 | **Knowledge Base (RAG)** | 🟢 Complete | High | 95% | Cascading deletion, status polling, and version superseding are stable. |
 | **Booking & Integrations** | 🟢 Complete | High | 100% | Advisory locks, calendar JWT sync, and AES-256 credential encryption are stable. |
@@ -51,13 +51,8 @@ The next phases of development will transition the codebase from a highly comple
 * **Roadmap Priority**: **Completed (Issue #12)**
 
 ### 4.3 Real Acoustic Digital Signal Processing (DSP) for CAI
-* **Current State**: The Commitment Acoustic Index (CAI) and audio analytics use duration and pitch-variation approximations inferred from VAD activation.
-* **Known Problems**: The system does not analyze physical voice frequencies (pitch variation in Hz, speaking rates, amplitude peaks, or overlaps).
-* **Improvement Opportunities**:
-  - Parse packet metadata during WebSocket handling.
-  - Implement real-time interruption detection if Twilio sends user packets while the agent TTS is streaming.
-* **Dependencies**: WebAudio API on browser side; Node-based DSP audio resamplers on server side.
-* **Roadmap Priority**: **Medium-Term**
+* **Current State**: **Completed (Issue #14, #28)**. The Commitment Acoustic Index (CAI) and acoustic emotion analysis use real DSP extraction — pitch (Hz, via autocorrelation), energy, ZCR, energy modulation rate, pitch contour, speaking rate, and pause patterns — computed directly from PCM frames, not VAD-activation approximations. Multi-feature scored inference (not rigid thresholds) drives label selection, including crying/laughter discrimination. Real-time interruption detection (barge-in) is implemented via energy thresholds.
+* **Roadmap Priority**: **Completed**
 
 ### 4.4 Distributed Queue Routing for Telephony
 * **Current State**: The call queue manager (`lib/queue/manager.ts`) holds active calls in-process using an in-memory scheduler.
@@ -102,7 +97,8 @@ The next phases of development will transition the codebase from a highly comple
 * [x] Implement interruption triggers to halt agent TTS output immediately if user speech is detected. (Issue #14)
 * [x] Externalize circuit breaker state to Redis for multi-node deployments. (Issue #13)
 * [x] Implement adaptive memory importance scoring, time-decay, and retrieval explainability. (Issue #9/17)
-* [x] Replace lexicon-based emotion detection with a trained ML model (RoBERTa or similar) via the `detectTextEmotionML` hybrid engine interface.
+* [x] Integrate a trained ML emotion model (HuggingFace DistilRoBERTa) alongside the lexicon via a concurrent `detectTextEmotion()` router (`detectTextEmotionHF` + `detectTextEmotionLexicon`), with confidence-aware fusion. (Issue #26/#29)
+* [x] **Emotion Engine Phase 1 — Diagnostics & Acoustic Upgrade**: Per-engine diagnostic comparison (HF/Lexicon/Local-ONNX/Acoustic) with diagnostic CLI; scored multi-feature acoustic inference with crying/laughter detection; new local ONNX emotion engine (diagnostic-only). (Issues #26–#31)
 
 ### 5.3 Phase III: SaaS Portal (Weeks 6 - 10)
 * [x] Build Stripe subscription hooks and checkout routes.
