@@ -1,31 +1,31 @@
 /**
  * Acoustic Emotion Analysis — Maps acoustic features to EmotionSignal.
  *
- * Replaces the previous `detectAudioEmotionStub()`. Uses physical acoustic
- * measurements (pitch, energy, rate, pauses) to infer caller emotion from
- * the audio stream, independent of transcript text.
+ * Replaces the previous rigid if/else chain with a scored approach where
+ * multiple features contribute weighted scores to each candidate label.
  *
- * The resulting EmotionSignal (source: "audio") is fused with the text-based
- * signal via the existing `fuseEmotion()` function in detect.ts.
+ * Key improvements over v1:
+ * - Crying/sobbing detection (high pitch + broken speech + high energy modulation)
+ * - Laughter detection (high ZCR + rapid energy modulation + mid-high pitch)
+ * - ZCR is now used in label inference (was previously extracted but ignored)
+ * - Scored multi-feature inference instead of rigid if/else chain
+ * - Raised confidence ceiling to 0.85 for long utterances with clear patterns
+ * - Energy modulation rate and pitch contour are used when available
  */
 
 import type { AcousticFeatures, EmotionLabel, EmotionSignal, VAD } from "../types";
+import { CONFIG } from "../config";
 import { clamp } from "../util/math";
 import { classifyConfidence } from "./confidence";
 
 /**
  * Derive an EmotionSignal from physical acoustic features.
  *
- * Heuristic mapping (based on speech emotion research):
- * - High energy + high pitch → anger or excitement (disambiguated by rate)
- * - Low energy + low pitch + slow rate → sadness
- * - High pitch variation → engagement / excitement
- * - Monotone (low variation) → neutral or sadness
- * - Frequent pauses → confusion / hesitation
- * - Fast rate + high energy → excitement or anger
- *
- * Confidence scales with audio duration: <2s = low confidence (0.3),
- * 2-5s = medium (0.5), >5s = high (0.65+).
+ * Confidence scales with audio duration and pattern clarity:
+ * - <2s = low confidence (0.30)
+ * - 2-5s = medium (0.45–0.65)
+ * - 5-8s = high (0.65–0.75)
+ * - >8s with clear patterns = very high (up to 0.85)
  */
 export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | null {
   // Minimum meaningful analysis requires at least 500ms of audio
@@ -47,6 +47,15 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
     ? clamp(features.pauseDurationMs / features.durationMs, 0, 1)
     : 0;
 
+  // ZCR: already 0-1 from extraction
+  const zcr = features.zeroCrossingRate;
+
+  // Energy modulation: 0-1 (high = rapid amplitude changes like crying/laughter)
+  const energyMod = features.energyModulationRate ?? 0;
+
+  // Pitch contour: direction of pitch across the utterance
+  const contour = features.pitchContour ?? "flat";
+
   // ─── VAD computation from acoustic features ────────────────────────────
 
   // Valence: harder to determine from audio alone. Use rate + pitch variation
@@ -55,6 +64,8 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
   valence += (features.pitchVariation - 0.3) * 0.6;   // High variation → positive
   valence += (rateNorm - 0.5) * 0.3;                   // Fast → slightly positive
   valence -= pauseRatio * 0.3;                          // Pauses → slightly negative
+  // Unstable pitch contour suggests distress
+  if (contour === "unstable") valence -= 0.2;
   valence = clamp(valence, -1, 1);
 
   // Arousal: strongly correlated with energy, pitch, and rate
@@ -73,19 +84,37 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
 
   const vad: VAD = { v: valence, a: arousal, d: dominance };
 
-  // ─── Label inference ──────────────────────────────────────────────────
+  // ─── Scored label inference ────────────────────────────────────────────
 
-  const label = inferLabel(energyNorm, pitchNorm, features.pitchVariation, rateNorm, pauseRatio, vad);
+  const { label, patternStrength } = inferLabelScored({
+    energy: energyNorm,
+    pitch: pitchNorm,
+    pitchVariation: features.pitchVariation,
+    rate: rateNorm,
+    pauseRatio,
+    zcr,
+    energyMod,
+    contour,
+    pauseCount: features.pauseCount,
+    vad,
+  });
 
-  // ─── Confidence based on audio duration ────────────────────────────────
-  // Longer audio → more reliable acoustic analysis
+  // ─── Confidence based on audio duration + pattern clarity ──────────────
+
+  const { audioConfidenceCeiling, audioConfidenceCeilingLong } = CONFIG.emotion;
   let confidence: number;
   if (features.durationMs < 2000) {
     confidence = 0.3;  // Very short — low confidence
   } else if (features.durationMs < 5000) {
     confidence = 0.45 + (features.durationMs - 2000) / 15000; // 0.45–0.65
+  } else if (features.durationMs < 8000) {
+    confidence = Math.min(audioConfidenceCeiling, 0.65 + (features.durationMs - 5000) / 50000);
   } else {
-    confidence = Math.min(0.75, 0.65 + (features.durationMs - 5000) / 50000);
+    // Long utterances with clear acoustic patterns get higher confidence
+    confidence = Math.min(
+      audioConfidenceCeilingLong,
+      0.70 + (features.durationMs - 8000) / 100000 + patternStrength * 0.1
+    );
   }
 
   const intensity = clamp(Math.sqrt(vad.v * vad.v + vad.a * vad.a + vad.d * vad.d) / Math.sqrt(3));
@@ -101,57 +130,124 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
   };
 }
 
+// ─── Scored Label Inference ──────────────────────────────────────────────────
+
+interface NormalizedFeatures {
+  energy: number;
+  pitch: number;
+  pitchVariation: number;
+  rate: number;
+  pauseRatio: number;
+  zcr: number;
+  energyMod: number;
+  contour: "rising" | "falling" | "flat" | "unstable";
+  pauseCount: number;
+  vad: VAD;
+}
+
 /**
- * Map normalized acoustic features to an emotion label.
+ * Multi-feature scored label inference.
+ * Each candidate label accumulates a score based on feature contributions.
+ * Returns the highest-scoring label and a pattern strength (0-1) indicating
+ * how clear/distinctive the acoustic pattern is.
  */
-function inferLabel(
-  energy: number,
-  pitch: number,
-  pitchVariation: number,
-  rate: number,
-  pauseRatio: number,
-  vad: VAD,
-): EmotionLabel {
-  // High energy + high pitch + fast rate → anger or excitement
-  if (energy > 0.6 && pitch > 0.5 && rate > 0.6) {
-    // Disambiguate: high pitch variation = excitement, low = anger
-    return pitchVariation > 0.4 ? "excitement" : "anger";
+function inferLabelScored(f: NormalizedFeatures): { label: EmotionLabel; patternStrength: number } {
+  const scores: Record<EmotionLabel, number> = {
+    neutral: 0,
+    anger: 0,
+    frustration: 0,
+    sadness: 0,
+    distress: 0,
+    fear: 0,
+    confusion: 0,
+    joy: 0,
+    gratitude: 0,
+    excitement: 0,
+    disappointment: 0,
+  };
+
+  // ── Anger: high energy, high pitch, fast rate, LOW pitch variation (controlled rage)
+  if (f.energy > 0.6) scores.anger += 0.3;
+  if (f.pitch > 0.5) scores.anger += 0.2;
+  if (f.rate > 0.6) scores.anger += 0.2;
+  if (f.pitchVariation < 0.25) scores.anger += 0.3; // Monotone loud = angry
+  if (f.energy > 0.7 && f.pitchVariation < 0.2) scores.anger += 0.2; // Strong signal
+
+  // ── Excitement: high energy, high pitch, fast rate, HIGH pitch variation
+  if (f.energy > 0.5) scores.excitement += 0.2;
+  if (f.pitch > 0.5) scores.excitement += 0.15;
+  if (f.rate > 0.5) scores.excitement += 0.15;
+  if (f.pitchVariation > 0.4) scores.excitement += 0.3;
+  if (f.energy > 0.4 && f.pitchVariation > 0.5) scores.excitement += 0.2;
+
+  // ── Sadness: low energy, low pitch, slow rate, low variation, falling contour
+  if (f.energy < 0.3) scores.sadness += 0.25;
+  if (f.pitch < 0.4) scores.sadness += 0.2;
+  if (f.rate < 0.4) scores.sadness += 0.2;
+  if (f.pitchVariation < 0.2) scores.sadness += 0.15;
+  if (f.contour === "falling") scores.sadness += 0.15;
+
+  // ── Crying/Sobbing → maps to distress (NOT sadness):
+  // High pitch + high energy modulation + broken speech (many short pauses) + unstable contour
+  if (f.energyMod > 0.5 && f.pitch > 0.4) scores.distress += 0.3;
+  if (f.energyMod > 0.4 && f.pauseCount > 2) scores.distress += 0.25;
+  if (f.contour === "unstable") scores.distress += 0.2;
+  if (f.pitchVariation > 0.4 && f.energy > 0.3 && f.energyMod > 0.3) scores.distress += 0.25;
+  // Distinguish from anger: crying has high pitch variation, anger has low
+  if (f.energy > 0.5 && f.pitch > 0.5 && f.pitchVariation > 0.35 && f.energyMod > 0.4) scores.distress += 0.2;
+
+  // ── Laughter → maps to joy:
+  // Very high ZCR + rapid energy modulation + mid-high pitch + moderate-high energy
+  if (f.zcr > 0.3 && f.energyMod > 0.4) scores.joy += 0.3;
+  if (f.zcr > 0.35 && f.energy > 0.4 && f.pitch > 0.4) scores.joy += 0.3;
+  if (f.energyMod > 0.5 && f.pitchVariation > 0.3 && f.zcr > 0.25) scores.joy += 0.2;
+
+  // ── Frustration: high energy + high pitch but moderate rate
+  if (f.energy > 0.5 && f.pitch > 0.5 && f.rate >= 0.3 && f.rate < 0.6) scores.frustration += 0.4;
+  if (f.energy > 0.4 && f.pitchVariation > 0.2 && f.pitchVariation < 0.4) scores.frustration += 0.2;
+
+  // ── Confusion: frequent pauses + low energy + hesitation patterns
+  if (f.pauseRatio > 0.3 && f.energy < 0.4) scores.confusion += 0.4;
+  if (f.pauseRatio > 0.2 && f.rate < 0.4) scores.confusion += 0.2;
+  if (f.contour === "rising") scores.confusion += 0.15; // Question intonation
+
+  // ── Fear: moderate energy, high pitch, pauses, rising contour
+  if (f.pauseRatio > 0.2 && f.energy > 0.3 && f.energy < 0.5 && f.pitch > 0.5) scores.fear += 0.35;
+  if (f.contour === "rising" && f.pitch > 0.6) scores.fear += 0.2;
+  if (f.rate > 0.6 && f.pitch > 0.6 && f.energy < 0.5) scores.fear += 0.15;
+
+  // ── Distress (general): high energy + low pitch (deep groaning/distress sounds)
+  if (f.energy > 0.5 && f.pitch < 0.3) scores.distress += 0.3;
+
+  // ── Disappointment: low energy, slight falling contour, slow rate
+  if (f.energy < 0.35 && f.rate < 0.4 && f.contour === "falling") scores.disappointment += 0.35;
+  if (f.pitchVariation < 0.15 && f.energy < 0.3) scores.disappointment += 0.15;
+
+  // ── Neutral: low variation, moderate everything, no strong signals
+  if (f.pitchVariation < 0.15 && f.vad.a < 0) scores.neutral += 0.3;
+  if (f.energy > 0.2 && f.energy < 0.5 && f.rate > 0.3 && f.rate < 0.6) scores.neutral += 0.2;
+  // Neutral gets a base score — it should win when nothing else is strong
+  scores.neutral += 0.15;
+
+  // ── Find winner ─────────────────────────────────────────────────────────
+  let bestLabel: EmotionLabel = "neutral";
+  let bestScore = 0;
+  let secondBestScore = 0;
+
+  for (const [lbl, score] of Object.entries(scores) as [EmotionLabel, number][]) {
+    if (score > bestScore) {
+      secondBestScore = bestScore;
+      bestScore = score;
+      bestLabel = lbl;
+    } else if (score > secondBestScore) {
+      secondBestScore = score;
+    }
   }
 
-  // High energy + high pitch but moderate rate → frustration
-  if (energy > 0.5 && pitch > 0.5 && rate >= 0.4) {
-    return "frustration";
-  }
+  // Pattern strength: how much the winner stands out from runner-up (0-1)
+  const patternStrength = bestScore > 0
+    ? clamp((bestScore - secondBestScore) / bestScore, 0, 1)
+    : 0;
 
-  // Low energy + low pitch + slow rate → sadness
-  if (energy < 0.3 && pitch < 0.4 && rate < 0.4) {
-    return "sadness";
-  }
-
-  // Frequent pauses + low energy → confusion
-  if (pauseRatio > 0.3 && energy < 0.4) {
-    return "confusion";
-  }
-
-  // High pitch variation + moderate-high energy → excitement
-  if (pitchVariation > 0.5 && energy > 0.4) {
-    return "excitement";
-  }
-
-  // Low pitch variation (monotone) + low arousal → neutral or disengagement
-  if (pitchVariation < 0.15 && vad.a < 0) {
-    return "neutral";
-  }
-
-  // Moderate energy + some pauses → fear/hesitation
-  if (pauseRatio > 0.2 && energy > 0.3 && energy < 0.5 && pitch > 0.5) {
-    return "fear";
-  }
-
-  // High energy + low pitch → distress
-  if (energy > 0.5 && pitch < 0.3) {
-    return "distress";
-  }
-
-  return "neutral";
+  return { label: bestLabel, patternStrength };
 }

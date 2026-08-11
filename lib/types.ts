@@ -143,4 +143,44 @@ export interface AcousticFeatures {
   pauseCount: number;
   /** Total audio duration in ms. */
   durationMs: number;
+  /** Rate of energy change between frames (0–1). High = rapid amplitude modulation (crying/laughter). */
+  energyModulationRate?: number;
+  /** Overall pitch contour direction across the utterance. */
+  pitchContour?: "rising" | "falling" | "flat" | "unstable";
+}
+
+/**
+ * Per-engine emotion analysis result for diagnostic comparison.
+ */
+export interface EmotionEngineResult {
+  engine: "hf" | "lexicon" | "local_ml" | "acoustic";
+  label: EmotionLabel;
+  confidence: number;
+  intensity: number;
+  vad: VAD;
+  importance: number;
+  memoryClassification: MemoryTier;
+  latencyMs: number;
+  /** HF-specific: whether the API call timed out */
+  timedOut?: boolean;
+  /** Lexicon-specific: keywords that matched */
+  matchedKeywords?: string[];
+  /** Acoustic-specific: raw features used */
+  acousticFeatures?: AcousticFeatures;
+  /** Additional metadata */
+  meta?: Record<string, unknown>;
+}
+
+/**
+ * Full diagnostic bundle comparing all emotion engines side-by-side.
+ */
+export interface DiagnosticEmotionResult {
+  text: string;
+  timestamp: number;
+  engines: EmotionEngineResult[];
+  fusedResult: EmotionSignal;
+  fusionDecision: {
+    selectedEngine: string;
+    reason: string;
+  };
 }

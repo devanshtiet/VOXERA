@@ -129,6 +129,13 @@ export function extractAcousticFeatures(pcm: Buffer, wordCount: number): Acousti
   // Pause detection
   const { pauseDurationMs, pauseCount } = detectPauses(pcm, sampleCount);
 
+  // Energy modulation rate: measures how rapidly energy changes between frames.
+  // High values indicate rapid amplitude oscillation (crying, laughter, sobs).
+  const energyModulationRate = computeEnergyModulation(pcm, sampleCount);
+
+  // Pitch contour: overall direction of pitch across the utterance
+  const pitchContour = computePitchContour(framePitches);
+
   return {
     rmsEnergy,
     zeroCrossingRate,
@@ -138,6 +145,8 @@ export function extractAcousticFeatures(pcm: Buffer, wordCount: number): Acousti
     pauseDurationMs,
     pauseCount,
     durationMs,
+    energyModulationRate,
+    pitchContour,
   };
 }
 
@@ -254,4 +263,68 @@ function detectPauses(pcm: Buffer, sampleCount: number): { pauseDurationMs: numb
 
   const pauseDurationMs = (totalPauseSamples / SAMPLE_RATE) * 1000;
   return { pauseDurationMs, pauseCount };
+}
+
+/**
+ * Compute energy modulation rate — how rapidly amplitude changes between frames.
+ * High values indicate rapid oscillation (crying sobs, laughter bursts).
+ * Returns a value in 0–1 range.
+ */
+function computeEnergyModulation(pcm: Buffer, sampleCount: number): number {
+  const windowSize = FRAME_SIZE; // 20ms windows
+  const energies: number[] = [];
+
+  for (let offset = 0; offset + windowSize <= sampleCount; offset += windowSize) {
+    let sumSq = 0;
+    for (let i = 0; i < windowSize; i++) {
+      const sample = pcm.readInt16LE((offset + i) * 2);
+      sumSq += sample * sample;
+    }
+    energies.push(Math.sqrt(sumSq / windowSize));
+  }
+
+  if (energies.length < 3) return 0;
+
+  // Compute mean absolute difference between consecutive frame energies
+  let totalDiff = 0;
+  for (let i = 1; i < energies.length; i++) {
+    totalDiff += Math.abs(energies[i] - energies[i - 1]);
+  }
+  const meanDiff = totalDiff / (energies.length - 1);
+
+  // Normalize: typical speech has meanDiff ~200-800, high modulation >1500
+  return Math.min(1, meanDiff / 2000);
+}
+
+/**
+ * Determine overall pitch contour direction using simple linear regression.
+ * Returns "rising", "falling", "flat", or "unstable".
+ */
+function computePitchContour(framePitches: number[]): "rising" | "falling" | "flat" | "unstable" {
+  if (framePitches.length < 3) return "flat";
+
+  const n = framePitches.length;
+  const mean = framePitches.reduce((s, p) => s + p, 0) / n;
+
+  // Simple linear regression: y = mx + b
+  let sumXY = 0;
+  let sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = i - (n - 1) / 2; // center the x values
+    sumXY += x * (framePitches[i] - mean);
+    sumX2 += x * x;
+  }
+  const slope = sumX2 > 0 ? sumXY / sumX2 : 0;
+
+  // Normalize slope relative to mean pitch
+  const normalizedSlope = mean > 0 ? slope / mean : 0;
+
+  // Check for instability (high coefficient of variation)
+  const variance = framePitches.reduce((s, p) => s + (p - mean) ** 2, 0) / n;
+  const cv = mean > 0 ? Math.sqrt(variance) / mean : 0;
+
+  if (cv > 0.4) return "unstable"; // Very erratic pitch = emotional instability
+  if (normalizedSlope > 0.003) return "rising";
+  if (normalizedSlope < -0.003) return "falling";
+  return "flat";
 }

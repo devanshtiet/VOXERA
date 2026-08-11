@@ -1,16 +1,24 @@
 import type { EmotionLabel, EmotionSignal, VAD } from "../types";
+import { CONFIG } from "../config";
 import { clamp } from "../util/math";
 import { classifyConfidence } from "./confidence";
 import { LEXICON } from "./lexicon";
+import { detectTextEmotionHF, type HFDetectResult } from "./ml-detect";
 
 import MLClassifier from "./classifier";
 
-// Text emotion detector. Lexicon + caps/punctuation cues.
-// Returns a calibrated EmotionSignal.
-export function detectTextEmotionLexicon(text: string): EmotionSignal {
+// ─── Lexicon Engine ──────────────────────────────────────────────────────────
+
+/**
+ * Deterministic text emotion detector using keyword lexicon + punctuation cues.
+ * Always returns synchronously (zero-latency).
+ * Returns a calibrated EmotionSignal.
+ */
+export function detectTextEmotionLexicon(text: string): EmotionSignal & { matchedKeywords: string[] } {
   const labelScores: Partial<Record<EmotionLabel, number>> = {};
   const vadAcc: VAD = { v: 0, a: 0, d: 0 };
   let totalW = 0;
+  const matchedKeywords: string[] = [];
 
   const negLabels = new Set<EmotionLabel>(["frustration", "anger", "distress", "sadness", "fear", "disappointment"]);
   const posLabels = new Set<EmotionLabel>(["joy", "gratitude", "excitement"]);
@@ -26,6 +34,7 @@ export function detectTextEmotionLexicon(text: string): EmotionSignal {
     vadAcc.a += entry.vad.a * w;
     vadAcc.d += entry.vad.d * w;
     totalW += w;
+    matchedKeywords.push(...matches);
     if (negLabels.has(entry.label)) hasNegMatch = true;
     if (posLabels.has(entry.label)) hasPosMatch = true;
   }
@@ -95,24 +104,35 @@ export function detectTextEmotionLexicon(text: string): EmotionSignal {
     source: "text",
     at: Date.now(),
     isMixed,
+    matchedKeywords,
   };
 }
 
-// ML-based emotion detector using Hybrid SST-2 Sentiment + Lexicon engine
-export async function detectTextEmotionML(text: string): Promise<EmotionSignal> {
+// ─── Local ML Engine (SST-2 Sentiment — binary POSITIVE/NEGATIVE) ───────────
+
+/**
+ * Local ML classification using @xenova/transformers with DistilBERT-SST2.
+ * NOTE: This is a 2-class sentiment model (POSITIVE/NEGATIVE), NOT a
+ * multi-class emotion model. It can validate sentiment direction but cannot
+ * distinguish between specific emotions (anger vs sadness vs fear).
+ *
+ * Used as a secondary check to validate lexicon direction, not as a primary
+ * emotion classifier.
+ */
+export async function detectTextEmotionLocal(text: string): Promise<EmotionSignal> {
   const classifier = await MLClassifier.getInstance();
-  
+
   // Predict POSITIVE/NEGATIVE using Deep Learning
   const results = await classifier(text) as { label: string; score: number }[];
   const sentiment = results[0]; // e.g., { label: "POSITIVE", score: 0.99 }
 
-  // Fallback to Lexicon to get specific emotional nuance
+  // Get specific emotional nuance from lexicon
   const lexSignal = detectTextEmotionLexicon(text);
 
   // Hybrid Fusion Logic
   let label: EmotionLabel = lexSignal.label;
   let isOverride = false;
-  
+
   // Only override neutral if ML is incredibly confident it's NEGATIVE
   if (lexSignal.label === "neutral" && lexSignal.confidence <= 0.5) {
     if (sentiment.score > 0.98 && sentiment.label === "NEGATIVE") {
@@ -123,7 +143,7 @@ export async function detectTextEmotionML(text: string): Promise<EmotionSignal> 
     // If Lexicon found something, ensure it matches ML sentiment direction!
     const negativeLabels = ["anger", "frustration", "sadness", "distress", "fear", "disappointment"];
     const positiveLabels = ["joy", "gratitude", "excitement"];
-    
+
     if (sentiment.label === "POSITIVE" && negativeLabels.includes(lexSignal.label) && sentiment.score > 0.9) {
       label = "joy";
       isOverride = true;
@@ -166,7 +186,6 @@ export async function detectTextEmotionML(text: string): Promise<EmotionSignal> 
   }
 
   // Probabilistic OR for confidence: 1 - (1 - P_lex) * (1 - P_ml)
-  // This yields a much more statistically robust confidence score
   let confidence = clamp(1 - (1 - lexSignal.confidence) * (1 - sentiment.score));
 
   if (label === "neutral") {
@@ -187,33 +206,149 @@ export async function detectTextEmotionML(text: string): Promise<EmotionSignal> 
   };
 }
 
-// Universal Router (Business Logic)
-export async function detectTextEmotion(text: string, engine: 'ml' | 'lexicon' = 'ml'): Promise<EmotionSignal> {
-  if (engine === 'lexicon') {
-    return detectTextEmotionLexicon(text);
-  }
-  try {
-    return await detectTextEmotionML(text);
-  } catch (error) {
-    console.warn("ML Classification failed, falling back to Lexicon:", error);
-    return detectTextEmotionLexicon(text);
-  }
+// ─── Concurrent Universal Router ────────────────────────────────────────────
+
+/**
+ * Result from the concurrent text emotion detection pipeline.
+ * Exposes both individual engine results for diagnostics.
+ */
+export interface TextEmotionResult {
+  /** The selected primary signal used for downstream processing. */
+  primary: EmotionSignal;
+  /** Lexicon engine result (always available, zero-latency). */
+  lexicon: EmotionSignal & { matchedKeywords: string[] };
+  /** HuggingFace engine result (null if timed out or unavailable). */
+  hf: HFDetectResult;
+  /** Which engine was selected as primary and why. */
+  selection: { engine: "hf" | "lexicon"; reason: string };
 }
 
+/**
+ * Universal text emotion router. Runs HF and Lexicon CONCURRENTLY.
+ *
+ * Design:
+ *   HF ─────────→ result (races against latency budget)
+ *   Lexicon ────→ result (instant, always ready)
+ *
+ * If HF finishes within the latency budget and returns a valid signal,
+ * it's used as the primary candidate. Otherwise, lexicon is immediately used.
+ *
+ * Both results are always returned for diagnostic comparison.
+ */
+export async function detectTextEmotion(text: string): Promise<TextEmotionResult> {
+  // Run HF and Lexicon concurrently — lexicon is synchronous but wrapped
+  // in Promise.allSettled for uniform handling
+  const [hfSettled, lexiconResult] = await Promise.all([
+    detectTextEmotionHF(text).catch((err): HFDetectResult => {
+      console.warn("[EmotionRouter] HF detection threw:", err);
+      return { signal: null, latencyMs: 0, timedOut: false };
+    }),
+    Promise.resolve(detectTextEmotionLexicon(text)),
+  ]);
 
-// Late fusion per §3.1: confidence-weighted mix of VAD and label distributions.
-export function fuseEmotion(text: EmotionSignal, audio: EmotionSignal | null): EmotionSignal {
-  if (!audio) return { ...text, source: "fused" };
+  const hfResult = hfSettled;
+
+  // Selection logic: HF wins if it returned a valid signal within budget
+  if (hfResult.signal && !hfResult.timedOut) {
+    return {
+      primary: hfResult.signal,
+      lexicon: lexiconResult,
+      hf: hfResult,
+      selection: {
+        engine: "hf",
+        reason: `HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
+      },
+    };
+  }
+
+  // Fallback: use lexicon
+  const reason = hfResult.timedOut
+    ? `HF timed out after ${hfResult.latencyMs.toFixed(1)}ms, using lexicon fallback`
+    : hfResult.signal === null
+      ? "HF unavailable (no token or error), using lexicon"
+      : "HF returned no signal, using lexicon";
+
+  return {
+    primary: lexiconResult,
+    lexicon: lexiconResult,
+    hf: hfResult,
+    selection: { engine: "lexicon", reason },
+  };
+}
+
+// ─── Emotion Fusion ─────────────────────────────────────────────────────────
+
+/**
+ * Late fusion per §3.1: confidence-weighted mix of VAD and label distributions
+ * between text and audio emotion signals.
+ *
+ * Improvements over original:
+ * - Minimum confidence threshold: if both < fusionMinConfidence, return neutral
+ * - Confidence margin: winner must have at least fusionConfidenceMargin higher
+ *   confidence than loser, otherwise text wins (tie-breaking toward semantic)
+ * - Preserves isMixed flag from text signal
+ * - Attaches individual signals for diagnostics
+ */
+export function fuseEmotion(
+  text: EmotionSignal,
+  audio: EmotionSignal | null
+): EmotionSignal & { textSignal?: EmotionSignal; audioSignal?: EmotionSignal | null } {
+  if (!audio) {
+    return { ...text, source: "fused", textSignal: text, audioSignal: null };
+  }
+
   const wa = audio.confidence;
   const wt = text.confidence;
   const sum = wa + wt || 1;
+
+  // Confidence-weighted VAD blending
   const vad: VAD = {
     v: (audio.vad.v * wa + text.vad.v * wt) / sum,
     a: (audio.vad.a * wa + text.vad.a * wt) / sum,
     d: (audio.vad.d * wa + text.vad.d * wt) / sum,
   };
-  const label = audio.confidence > text.confidence ? audio.label : text.label;
+
+  const { fusionConfidenceMargin, fusionMinConfidence } = CONFIG.emotion;
+
+  // If both engines have very low confidence, default to neutral
+  if (text.confidence < fusionMinConfidence && audio.confidence < fusionMinConfidence) {
+    return {
+      label: "neutral",
+      intensity: 0,
+      confidence: Math.max(text.confidence, audio.confidence),
+      confidenceCategory: classifyConfidence(Math.max(text.confidence, audio.confidence)),
+      vad: { v: 0, a: 0, d: 0 },
+      source: "fused",
+      at: Date.now(),
+      textSignal: text,
+      audioSignal: audio,
+    };
+  }
+
+  // Label selection: require a meaningful confidence margin to override
+  let label: EmotionLabel;
+  if (audio.confidence > text.confidence + fusionConfidenceMargin) {
+    label = audio.label;
+  } else if (text.confidence > audio.confidence + fusionConfidenceMargin) {
+    label = text.label;
+  } else {
+    // Within margin: prefer text (semantic meaning is generally more reliable)
+    label = text.label;
+  }
+
   const intensity = clamp(Math.sqrt(vad.v * vad.v + vad.a * vad.a + vad.d * vad.d) / Math.sqrt(3));
   const confidence = clamp((audio.confidence + text.confidence) / 2 + 0.05);
-  return { label, intensity, confidence, confidenceCategory: classifyConfidence(confidence), vad, source: "fused", at: Date.now() };
+
+  return {
+    label,
+    intensity,
+    confidence,
+    confidenceCategory: classifyConfidence(confidence),
+    vad,
+    source: "fused",
+    at: Date.now(),
+    isMixed: text.isMixed,
+    textSignal: text,
+    audioSignal: audio,
+  };
 }

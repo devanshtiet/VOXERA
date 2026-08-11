@@ -79,4 +79,18 @@ export const CONFIG = {
     // Issue #14: Silence threshold for pause detection in acoustic analysis.
     silenceEnergyThreshold: 200,
   },
+  emotion: {
+    /** When true, run all engines and log per-engine diagnostic results. */
+    diagnosticMode: true,
+    /** Strict latency budget (ms) for the HuggingFace API call. */
+    hfLatencyBudgetMs: 200,
+    /** Maximum audio confidence for short utterances (<5s). */
+    audioConfidenceCeiling: 0.75,
+    /** Maximum audio confidence for long utterances (>8s) with clear patterns. */
+    audioConfidenceCeilingLong: 0.85,
+    /** Minimum confidence margin required for one engine to override another in fusion. */
+    fusionConfidenceMargin: 0.15,
+    /** Below this confidence, both engines are effectively guessing → default to neutral. */
+    fusionMinConfidence: 0.3,
+  },
 } as const;
