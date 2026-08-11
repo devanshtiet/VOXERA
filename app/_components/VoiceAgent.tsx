@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Send, Square, Activity, Loader2, Repeat } from "lucide-react";
+import { Mic, Send, Square, Activity, Loader2, Repeat, Gauge } from "lucide-react";
 import {
   PipelineTracker,
   EngineDiagnosticPanel,
@@ -272,51 +272,58 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
         </div>
       )}
 
-      {/* Live Engine Dashboard */}
-      <section className="flex flex-col gap-4 bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)]">
-              Live Pipeline
+      {/* Live Engine Console */}
+      <section className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--color-border-subtle)]">
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--color-accent-violet)]/10 text-[var(--color-accent-violet)] flex-none">
+              <Gauge className="w-4 h-4" />
             </span>
-            {continuousMode && (
-              <span className="flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-accent-violet)]">
-                <Repeat className="w-3 h-3 animate-pulse" /> Continuous
-              </span>
-            )}
+            <div>
+              <div className="text-[13px] font-bold text-[var(--color-text-primary)] leading-tight">Live Engine Console</div>
+              <div className="text-[10.5px] text-[var(--color-text-muted)]">Ground-truth view of every stage, every turn</div>
+            </div>
           </div>
+          {continuousMode && (
+            <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10 px-2.5 py-1 rounded-full flex-none">
+              <Repeat className="w-3 h-3 animate-pulse" /> Continuous
+            </span>
+          )}
+        </div>
+
+        <div className="px-5 pt-5 pb-4 border-b border-[var(--color-border-subtle)]">
           <PipelineTracker stage={stage} />
         </div>
-        <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2">
-            Emotion Engine — HF / Lexicon / Local ONNX / Acoustic
+
+        <div className="px-5 pt-4 pb-1">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2.5">
+            Emotion Engines — HF / Lexicon / Local ONNX / Acoustic
           </div>
           <EngineDiagnosticPanel diagnostics={diagnostics} />
         </div>
-        <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2">
-            Emotion Timeline (this session)
+
+        <div className="px-5 pt-4 pb-5">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2.5">
+            Emotion Timeline — this session
           </div>
           <EmotionTimeline history={emotionHistory} />
         </div>
       </section>
 
-      {/* Input Area */}
-      <div className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-2 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+      {/* Input Console */}
+      <div className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
         <textarea
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
           placeholder="Type a message or press Record to speak…"
-          className="w-full bg-transparent border-0 focus:ring-0 px-4 py-3 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] resize-none min-h-[80px]"
+          className="w-full bg-transparent border-0 focus:ring-0 px-5 pt-4 pb-2 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] resize-none min-h-[56px]"
         />
-        
+
         {/* Actions Bar */}
-        <div className="flex justify-between items-center px-2 pb-2">
-          
-          <div className="flex items-center gap-2">
-            {/* Audio State Visualizer */}
-            {(busy || isPlaying || recording) && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)]">
+        <div className="flex justify-between items-center gap-3 px-4 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-base)]/40">
+          <div className="flex items-center min-w-0">
+            {(busy || isPlaying || recording) ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)]">
                 {recording ? (
                   <div className="flex items-center gap-2 text-red-500 font-mono text-[10px] font-bold uppercase tracking-widest">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,1)]" /> Recording
@@ -331,17 +338,19 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
                   </div>
                 ) : null}
               </div>
+            ) : (
+              <span className="text-[11.5px] text-[var(--color-text-muted)] hidden sm:inline">Type, or press Record to speak</span>
             )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-none">
             <button
               onClick={toggleContinuousMode}
               title="Automatically listen again after each reply — a continuous back-and-forth conversation loop"
               className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] font-semibold transition-all ${
                 continuousMode
                   ? "bg-[var(--color-accent-violet)]/15 border border-[var(--color-accent-violet)]/50 text-[var(--color-accent-violet)]"
-                  : "bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]"
+                  : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]"
               }`}
             >
               <Repeat className="w-4 h-4" />
@@ -354,7 +363,7 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all ${
                 recording
                   ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:bg-red-600"
-                  : "bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[var(--color-text-primary)] hover:border-[var(--color-border-active)]"
+                  : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] text-[var(--color-text-primary)] hover:border-[var(--color-border-active)]"
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               {recording ? <Square className="w-4 h-4 fill-current" /> : <Mic className="w-4 h-4" />}
