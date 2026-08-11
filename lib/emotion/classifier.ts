@@ -11,7 +11,7 @@ class MLClassifier {
 
   static async getInstance(progress_callback?: (progress: any) => void): Promise<TextClassificationPipeline> {
     if (this.instance === null) {
-      // @ts-ignore - transformers.js types are sometimes loose
+      // @ts-expect-error - transformers.js types are sometimes loose
       this.instance = (await pipeline(this.task, this.model, { 
         progress_callback 
       })) as TextClassificationPipeline;
