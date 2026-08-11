@@ -14,7 +14,8 @@ export type SessionEventType =
   | "calendar_sync"
   | "email_dispatch"
   | "input_guard"
-  | "acoustic";
+  | "acoustic"
+  | "emotion_diagnostic";
 
 export interface SessionEvent {
   ts: number;

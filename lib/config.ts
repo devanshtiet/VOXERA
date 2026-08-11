@@ -80,8 +80,14 @@ export const CONFIG = {
     silenceEnergyThreshold: 200,
   },
   emotion: {
-    /** When true, run all engines and log per-engine diagnostic results. */
-    diagnosticMode: true,
+    /**
+     * When true, the orchestrator additionally runs the full diagnostic
+     * engine comparison (HF + Lexicon + Local ONNX + Acoustic) on every turn
+     * and attaches it to the trace/session log. Off by default in production
+     * to avoid the extra local-model inference and logging cost on every
+     * live call — enable for debugging or via scripts/test-emotion-diagnostic.ts.
+     */
+    diagnosticMode: false,
     /** Strict latency budget (ms) for the HuggingFace API call. */
     hfLatencyBudgetMs: 200,
     /** Maximum audio confidence for short utterances (<5s). */
