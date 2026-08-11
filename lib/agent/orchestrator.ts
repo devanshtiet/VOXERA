@@ -2,7 +2,6 @@ import { nanoid } from "nanoid";
 import { CONFIG } from "../config";
 import { buildEmotionContext } from "../emotion/context";
 import { detectTextEmotion, fuseEmotion } from "../emotion/detect";
-import { detectTextEmotionML } from "../emotion/ml-detect";
 import { detectAudioEmotion } from "../emotion/audio-emotion";
 import { importanceScore, novelty, policyFlag, taskCriticality } from "../emotion/importance";
 import { calculateCAI, type CAIResult } from "../emotion/cai";
@@ -106,7 +105,8 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   }
 
   // ── Issue #14: Acoustic Emotion Analysis ────────────────────────────────
-  const textEmo = await detectTextEmotionML(input.transcript);
+  const textEmoResult = await detectTextEmotion(input.transcript);
+  const textEmo = textEmoResult.primary;
   const audioEmo = input.acousticFeatures
     ? detectAudioEmotion(input.acousticFeatures)
     : (input.audioEmotion ?? null);

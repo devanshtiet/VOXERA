@@ -5,7 +5,7 @@ async function measureLatency() {
   
   console.log("Warming up ML model (Initial boot)...");
   const bootStart = performance.now();
-  await detectTextEmotion(text, 'ml');
+  await detectTextEmotion(text);
   const bootTime = performance.now() - bootStart;
   console.log(`ML Engine initial load time: ${bootTime.toFixed(2)}ms\n`);
 
@@ -21,7 +21,7 @@ async function measureLatency() {
   // Test ML (Premium Tier)
   const mlStart = performance.now();
   for (let i = 0; i < 100; i++) {
-    await detectTextEmotion(text, 'ml');
+    await detectTextEmotion(text);
   }
   const mlTime = (performance.now() - mlStart) / 100;
 

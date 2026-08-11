@@ -4,6 +4,26 @@ This document records the exact test suites, validation steps, and outcomes for 
 
 ---
 
+## 2026-08-11 — Fix: Hybrid Emotion Engine Build Break (post-"phase 1 initially")
+**Status:** ✅ VERIFIED
+**Key Technologies:** TypeScript, Vitest, Next.js/Turbopack
+
+**Context:** The prior "Hybrid Emotion Engine & Telephony Integration" entry below claimed a clean build and 212/0 passing tests, but that was not actually true at commit time. `npm run build` failed outright and 19 tests failed.
+
+**Validation Steps:**
+1. **Broken production import:** `lib/agent/orchestrator.ts` imported `detectTextEmotionML` from `lib/emotion/ml-detect.ts`, which no longer existed (renamed to `detectTextEmotionHF`). This broke every voice turn (`app/api/turn/route.ts` → `orchestrator.ts`). Fixed by switching to the new `detectTextEmotion()` router and using its `.primary` field.
+2. **Duplicate/diverging `AcousticFeatures` type:** `lib/audio/acoustic.ts` defined its own local interface missing `energyModulationRate`/`pitchContour`, conflicting with the canonical one in `lib/types.ts`. Removed the duplicate; now imports the shared type.
+3. **Stale test expectations:** `detectTextEmotion()` was changed to return a `TextEmotionResult` wrapper (`{primary, lexicon, hf, selection}`) instead of a flat `EmotionSignal`. Updated `__tests__/emotion/detect.test.ts` and `__tests__/e2e/voice-intelligence.test.ts` to read `.primary`.
+4. **Stale script call:** `scripts/latency_test.ts` called `detectTextEmotion(text, 'ml')` with an obsolete 2nd argument; the function now takes one argument.
+
+**E2E Test Execution:**
+- `npx tsc --noEmit` → **0 errors**
+- `npx vitest run` → **212 tests passed, 0 failures** across 22 test files
+- `npm run lint` → **0 errors, 0 warnings**
+- `npm run build` → **Build succeeded**
+
+---
+
 ## 2026-08-11 — Hybrid Emotion Engine & Telephony Integration
 **Status:** ✅ VERIFIED & MERGED
 **Key Technologies:** HuggingFace Inference API, RoBERTa, Fallback Circuit, ESLint Strict Rules

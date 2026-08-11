@@ -1,64 +1,65 @@
 import { describe, it, expect } from "vitest";
 import { detectTextEmotion, fuseEmotion } from "../../lib/emotion/detect";
+import type { ConfidenceCategory } from "../../lib/types";
 
 describe("Emotion Detection Lexicon & Calibration Suite (Issue #23)", () => {
   describe("Colloquial Contractions (Issue #23)", () => {
     it("matches feeling low variants", async () => {
-      const res = await detectTextEmotion("i m feelin low");
+      const res = (await detectTextEmotion("i m feelin low")).primary;
       expect(res.label).toBe("sadness");
       expect(res.confidence).toBeGreaterThan(0);
       expect(res.confidenceCategory?.level).toBeDefined();
     });
 
     it("matches feeling low with apostrophe", async () => {
-      const res = await detectTextEmotion("feelin' low");
+      const res = (await detectTextEmotion("feelin' low")).primary;
       expect(res.label).toBe("sadness");
     });
 
     it("matches explicit feeling low", async () => {
-      const res = await detectTextEmotion("feeling low");
+      const res = (await detectTextEmotion("feeling low")).primary;
       expect(res.label).toBe("sadness");
     });
 
     it("matches feel low", async () => {
-      const res = await detectTextEmotion("feel low");
+      const res = (await detectTextEmotion("feel low")).primary;
       expect(res.label).toBe("sadness");
     });
 
     it("matches frustration contractions", async () => {
-      const res = await detectTextEmotion("costin me money");
+      const res = (await detectTextEmotion("costin me money")).primary;
       expect(res.label).toBe("frustration");
     });
 
     it("matches distress contractions", async () => {
-      const res = await detectTextEmotion("breakin' down");
+      const res = (await detectTextEmotion("breakin' down")).primary;
       expect(res.label).toBe("distress");
     });
   });
 
   describe("Safety Nets", () => {
     it("defaults to neutral for normal inputs", async () => {
-      const res = await detectTextEmotion("this is a completely normal day");
+      const res = (await detectTextEmotion("this is a completely normal day")).primary;
       expect(res.label).toBe("neutral");
       expect(res.confidence).toBe(0.5);
       expect(res.confidenceCategory?.level).toBe("medium");
     });
 
     it("preserves positive excitement without regression", async () => {
-      const res = await detectTextEmotion("this is absolutely amazing!!!");
+      const res = (await detectTextEmotion("this is absolutely amazing!!!")).primary;
       expect(res.label).toBe("excitement");
       expect(res.confidence).toBeGreaterThan(0.5);
     });
 
     it("preserves gratitude correctly", async () => {
-      const res = await detectTextEmotion("thank you so much for the support");
+      const res = (await detectTextEmotion("thank you so much for the support")).primary;
       expect(res.label).toBe("gratitude");
     });
   });
 
   describe("Late Fusion (fuseEmotion)", () => {
     it("blends audio and text confidences correctly", async () => {
-      const textSig = await detectTextEmotion("i am angry");
+      const textSig = (await detectTextEmotion("i am angry")).primary;
       const audioSig = {
         label: "sadness" as any,
         intensity: 0.5,
