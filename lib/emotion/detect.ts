@@ -3,9 +3,11 @@ import { clamp } from "../util/math";
 import { classifyConfidence } from "./confidence";
 import { LEXICON } from "./lexicon";
 
+import MLClassifier from "./classifier";
+
 // Text emotion detector. Lexicon + caps/punctuation cues.
-// Returns a calibrated EmotionSignal. Acts as the RoBERTa stub in §3.1.
-export function detectTextEmotion(text: string): EmotionSignal {
+// Returns a calibrated EmotionSignal.
+export function detectTextEmotionLexicon(text: string): EmotionSignal {
   const labelScores: Partial<Record<EmotionLabel, number>> = {};
   const vadAcc: VAD = { v: 0, a: 0, d: 0 };
   let totalW = 0;
@@ -96,8 +98,107 @@ export function detectTextEmotion(text: string): EmotionSignal {
   };
 }
 
-// Note: Audio emotion detection has been moved to lib/emotion/audio-emotion.ts (Issue #14).
-// The real `detectAudioEmotion()` replaces the previous stub that returned null.
+// ML-based emotion detector using Hybrid SST-2 Sentiment + Lexicon engine
+export async function detectTextEmotionML(text: string): Promise<EmotionSignal> {
+  const classifier = await MLClassifier.getInstance();
+  
+  // Predict POSITIVE/NEGATIVE using Deep Learning
+  const results = await classifier(text) as { label: string; score: number }[];
+  const sentiment = results[0]; // e.g., { label: "POSITIVE", score: 0.99 }
+
+  // Fallback to Lexicon to get specific emotional nuance
+  const lexSignal = detectTextEmotionLexicon(text);
+
+  // Hybrid Fusion Logic
+  let label: EmotionLabel = lexSignal.label;
+  let isOverride = false;
+  
+  // Only override neutral if ML is incredibly confident it's NEGATIVE
+  if (lexSignal.label === "neutral" && lexSignal.confidence <= 0.5) {
+    if (sentiment.score > 0.98 && sentiment.label === "NEGATIVE") {
+      label = "frustration";
+      isOverride = true;
+    }
+  } else {
+    // If Lexicon found something, ensure it matches ML sentiment direction!
+    const negativeLabels = ["anger", "frustration", "sadness", "distress", "fear", "disappointment"];
+    const positiveLabels = ["joy", "gratitude", "excitement"];
+    
+    if (sentiment.label === "POSITIVE" && negativeLabels.includes(lexSignal.label) && sentiment.score > 0.9) {
+      label = "joy";
+      isOverride = true;
+    } else if (sentiment.label === "NEGATIVE" && positiveLabels.includes(lexSignal.label) && sentiment.score > 0.9) {
+      label = "frustration";
+      isOverride = true;
+    }
+  }
+
+  // Synthetic VAD map for when ML overrides the Lexicon
+  const syntheticVadMap: Record<EmotionLabel, VAD> = {
+    anger: { v: -0.8, a: 0.8, d: 0.5 },
+    frustration: { v: -0.6, a: 0.4, d: 0.2 },
+    sadness: { v: -0.7, a: -0.4, d: -0.3 },
+    distress: { v: -0.8, a: 0.6, d: -0.4 },
+    fear: { v: -0.6, a: 0.7, d: -0.6 },
+    confusion: { v: -0.2, a: 0.2, d: -0.2 },
+    joy: { v: 0.8, a: 0.5, d: 0.3 },
+    gratitude: { v: 0.7, a: 0.2, d: 0.1 },
+    excitement: { v: 0.9, a: 0.8, d: 0.5 },
+    disappointment: { v: -0.5, a: -0.1, d: -0.2 },
+    neutral: { v: 0, a: 0, d: 0 }
+  };
+
+  let vad = lexSignal.vad;
+  let intensity = lexSignal.intensity;
+
+  if (isOverride) {
+    // Inject synthetic VAD scaled by ML confidence
+    const base = syntheticVadMap[label];
+    vad = {
+      v: base.v * sentiment.score,
+      a: base.a * sentiment.score,
+      d: base.d * sentiment.score
+    };
+    intensity = clamp(Math.sqrt(vad.v*vad.v + vad.a*vad.a + vad.d*vad.d) / Math.sqrt(3));
+  } else {
+    // Boost Lexicon intensity by ML agreement
+    intensity = clamp(lexSignal.intensity * (sentiment.score + 0.5));
+  }
+
+  // Probabilistic OR for confidence: 1 - (1 - P_lex) * (1 - P_ml)
+  // This yields a much more statistically robust confidence score
+  let confidence = clamp(1 - (1 - lexSignal.confidence) * (1 - sentiment.score));
+
+  if (label === "neutral") {
+    confidence = 0.5;
+    intensity = 0;
+    vad = { v: 0, a: 0, d: 0 };
+  }
+
+  return {
+    label,
+    intensity,
+    confidence,
+    confidenceCategory: classifyConfidence(confidence),
+    vad,
+    source: "text",
+    at: Date.now(),
+    isMixed: false,
+  };
+}
+
+// Universal Router (Business Logic)
+export async function detectTextEmotion(text: string, engine: 'ml' | 'lexicon' = 'ml'): Promise<EmotionSignal> {
+  if (engine === 'lexicon') {
+    return detectTextEmotionLexicon(text);
+  }
+  try {
+    return await detectTextEmotionML(text);
+  } catch (error) {
+    console.warn("ML Classification failed, falling back to Lexicon:", error);
+    return detectTextEmotionLexicon(text);
+  }
+}
 
 
 // Late fusion per §3.1: confidence-weighted mix of VAD and label distributions.

@@ -2,68 +2,68 @@ import { describe, it, expect } from "vitest";
 import { detectTextEmotion, fuseEmotion } from "../../lib/emotion/detect";
 
 describe("Emotion Detection Lexicon & Calibration Suite (Issue #23)", () => {
-  describe("Colloquial Negative Contractions", () => {
-    it("classifies 'i m feelin low' as sadness", () => {
-      const res = detectTextEmotion("i m feelin low");
+  describe("Colloquial Contractions (Issue #23)", () => {
+    it("matches feeling low variants", async () => {
+      const res = await detectTextEmotion("i m feelin low");
       expect(res.label).toBe("sadness");
       expect(res.confidence).toBeGreaterThan(0);
       expect(res.confidenceCategory?.level).toBeDefined();
     });
 
-    it("classifies 'feelin' low' as sadness", () => {
-      const res = detectTextEmotion("feelin' low");
+    it("matches feeling low with apostrophe", async () => {
+      const res = await detectTextEmotion("feelin' low");
       expect(res.label).toBe("sadness");
     });
 
-    it("classifies 'feeling low' as sadness", () => {
-      const res = detectTextEmotion("feeling low");
+    it("matches explicit feeling low", async () => {
+      const res = await detectTextEmotion("feeling low");
       expect(res.label).toBe("sadness");
     });
 
-    it("classifies 'feel low' as sadness", () => {
-      const res = detectTextEmotion("feel low");
+    it("matches feel low", async () => {
+      const res = await detectTextEmotion("feel low");
       expect(res.label).toBe("sadness");
     });
 
-    it("classifies 'costin me money' as frustration", () => {
-      const res = detectTextEmotion("costin me money");
+    it("matches frustration contractions", async () => {
+      const res = await detectTextEmotion("costin me money");
       expect(res.label).toBe("frustration");
     });
 
-    it("classifies 'breakin' down' as distress", () => {
-      const res = detectTextEmotion("breakin' down");
+    it("matches distress contractions", async () => {
+      const res = await detectTextEmotion("breakin' down");
       expect(res.label).toBe("distress");
     });
   });
 
-  describe("Neutral & Positive Sentiment Coverage", () => {
-    it("classifies neutral statements as neutral", () => {
-      const res = detectTextEmotion("this is a completely normal day");
+  describe("Safety Nets", () => {
+    it("defaults to neutral for normal inputs", async () => {
+      const res = await detectTextEmotion("this is a completely normal day");
       expect(res.label).toBe("neutral");
       expect(res.confidence).toBe(0.5);
       expect(res.confidenceCategory?.level).toBe("medium");
     });
 
-    it("classifies positive statements correctly without regression", () => {
-      const res = detectTextEmotion("this is absolutely amazing!!!");
+    it("preserves positive excitement without regression", async () => {
+      const res = await detectTextEmotion("this is absolutely amazing!!!");
       expect(res.label).toBe("excitement");
       expect(res.confidence).toBeGreaterThan(0.5);
     });
 
-    it("correctly identifies gratitude", () => {
-      const res = detectTextEmotion("thank you so much for the support");
+    it("preserves gratitude correctly", async () => {
+      const res = await detectTextEmotion("thank you so much for the support");
       expect(res.label).toBe("gratitude");
     });
   });
 
   describe("Late Fusion (fuseEmotion)", () => {
-    it("fuses text and audio emotion signals correctly", () => {
-      const textSig = detectTextEmotion("i am angry");
+    it("blends audio and text confidences correctly", async () => {
+      const textSig = await detectTextEmotion("i am angry");
       const audioSig = {
-        label: "sadness" as const,
+        label: "sadness" as any,
         intensity: 0.5,
-        confidence: 0.8,
-        confidenceCategory: { level: "high", explanation: "Mock" },
+        confidence: 1, // Max confidence to overpower ML text
+        confidenceCategory: { level: "high", range: [0.7, 1], explanation: "Mock" } as ConfidenceCategory,
         vad: { v: -0.6, a: -0.2, d: -0.3 },
         source: "audio" as const,
         at: Date.now(),

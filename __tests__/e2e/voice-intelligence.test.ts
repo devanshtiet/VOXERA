@@ -309,8 +309,8 @@ describe("Issue #14: Advanced Voice Intelligence & Telephony Experience", () => 
   });
 
   describe("Emotion Fusion (Text + Audio)", () => {
-    it("fuses text and audio emotion signals with confidence weighting", () => {
-      const textEmo = detectTextEmotion("I'm so frustrated with this terrible service!");
+    it("fuses text and audio emotion signals with confidence weighting", async () => {
+      const textEmo = await detectTextEmotion("I'm so frustrated with this terrible service!");
       const audioFeatures: AcousticFeatures = {
         rmsEnergy: 4000, zeroCrossingRate: 0.15, pitchHz: 280,
         pitchVariation: 0.6, speakingRateWPM: 170, pauseDurationMs: 100,
@@ -327,8 +327,8 @@ describe("Issue #14: Advanced Voice Intelligence & Telephony Experience", () => 
       expect(fused.confidence).toBeGreaterThan(0);
     });
 
-    it("returns text-only when audio is null", () => {
-      const textEmo = detectTextEmotion("Hello, how are you?");
+    it("returns text-only when audio is null", async () => {
+      const textEmo = await detectTextEmotion("Hello, how are you?");
       const fused = fuseEmotion(textEmo, null);
       expect(fused.source).toBe("fused");
       expect(fused.label).toBe(textEmo.label);
