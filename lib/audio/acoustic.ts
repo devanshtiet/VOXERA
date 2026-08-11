@@ -93,15 +93,16 @@ export function extractAcousticFeatures(pcm: Buffer, wordCount: number): Acousti
 
   const zeroCrossingRate = frameCount > 0 ? totalZcr / frameCount : 0;
 
-  // Pitch statistics
+  // Pitch statistics — sort a copy for median/variance so the original
+  // chronological order survives for contour direction detection below.
   let pitchHz = 0;
   let pitchVariation = 0;
   if (framePitches.length > 0) {
-    framePitches.sort((a, b) => a - b);
-    pitchHz = framePitches[Math.floor(framePitches.length / 2)]; // median
+    const sortedPitches = [...framePitches].sort((a, b) => a - b);
+    pitchHz = sortedPitches[Math.floor(sortedPitches.length / 2)]; // median
 
-    const mean = framePitches.reduce((s, p) => s + p, 0) / framePitches.length;
-    const variance = framePitches.reduce((s, p) => s + (p - mean) ** 2, 0) / framePitches.length;
+    const mean = sortedPitches.reduce((s, p) => s + p, 0) / sortedPitches.length;
+    const variance = sortedPitches.reduce((s, p) => s + (p - mean) ** 2, 0) / sortedPitches.length;
     const stddev = Math.sqrt(variance);
     pitchVariation = mean > 0 ? Math.min(1, stddev / mean) : 0;
   }
