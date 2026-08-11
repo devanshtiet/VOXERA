@@ -12,6 +12,8 @@ const TurnSchema = z.object({
   clientId: z.string().min(1).default(DEMO.clientId),
   transcript: z.string().min(1),
   sttConfidence: z.number().min(0).max(1).optional(),
+  /** Opt into the full per-engine emotion diagnostic breakdown for this call only (used by the demo dashboard). */
+  diagnostics: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest) {

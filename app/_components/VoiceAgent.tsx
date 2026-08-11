@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Send, Square, Activity, Loader2 } from "lucide-react";
+import { Mic, Send, Square, Activity, Loader2, Repeat } from "lucide-react";
+import {
+  PipelineTracker,
+  EngineDiagnosticPanel,
+  EmotionTimeline,
+  type PipelineStage,
+  type DiagnosticEmotionResult,
+  type EmotionHistoryPoint,
+} from "./EngineDashboard";
 
 interface TurnTrace {
   utterance: {
@@ -28,6 +36,7 @@ interface TurnTrace {
   llmModel: string;
   usedLiveLlm: boolean;
   cai?: { score: number; category: string; explanation: string };
+  emotionDiagnostics?: DiagnosticEmotionResult;
 }
 
 interface TurnEntry {
@@ -42,6 +51,8 @@ interface VoiceAgentProps {
   userId?: string;
 }
 
+const MAX_SILENT_RETRIES = 3;
+
 export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}) {
   const [transcript, setTranscript] = useState("");
   const [history, setHistory] = useState<TurnEntry[]>([]);
@@ -49,14 +60,34 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
   const [recording, setRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stage, setStage] = useState<PipelineStage>("idle");
+  const [diagnostics, setDiagnostics] = useState<DiagnosticEmotionResult | null>(null);
+  const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
+  const [continuousMode, setContinuousMode] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const continuousModeRef = useRef(false);
+  const silentRetriesRef = useRef(0);
+  const startRecordingRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    continuousModeRef.current = continuousMode;
+  }, [continuousMode]);
 
   useEffect(() => {
     if (audioRef.current) {
-      audioRef.current.onplay = () => setIsPlaying(true);
-      audioRef.current.onended = () => setIsPlaying(false);
+      audioRef.current.onplay = () => {
+        setIsPlaying(true);
+        setStage("speaking");
+      };
+      audioRef.current.onended = () => {
+        setIsPlaying(false);
+        setStage("idle");
+        if (continuousModeRef.current) {
+          setTimeout(() => startRecordingRef.current(), 500);
+        }
+      };
       audioRef.current.onpause = () => setIsPlaying(false);
     }
   }, []);
@@ -66,11 +97,12 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
       if (!text.trim() || busy) return;
       setBusy(true);
       setError(null);
+      setStage("thinking");
       try {
         const res = await fetch("/api/turn", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript: text, sttConfidence, sessionId, clientId, userId }),
+          body: JSON.stringify({ transcript: text, sttConfidence, sessionId, clientId, userId, diagnostics: true }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -79,7 +111,15 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
         const data: { reply: string; trace: TurnTrace } = await res.json();
         setHistory((h) => [...h, { user: text, reply: data.reply, trace: data.trace }]);
         setTranscript("");
+        if (data.trace.emotionDiagnostics) {
+          setDiagnostics(data.trace.emotionDiagnostics);
+        }
+        setEmotionHistory((h) => [
+          ...h.slice(-59),
+          { ts: Date.now(), label: data.trace.emotion.current.label, intensity: data.trace.emotion.current.intensity },
+        ]);
 
+        setStage("synthesizing");
         const persona = localStorage.getItem("voxera_voice_persona") || "female-friendly";
         const tts = await fetch("/api/tts", {
           method: "POST",
@@ -93,9 +133,12 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
             audioRef.current.src = url;
             audioRef.current.play().catch(() => {});
           }
+        } else {
+          setStage("idle");
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        setStage("idle");
       } finally {
         setBusy(false);
       }
@@ -116,6 +159,7 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         setBusy(true);
+        setStage("transcribing");
         try {
           const res = await fetch("/api/stt", {
             method: "POST",
@@ -127,27 +171,68 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
             throw new Error(err.error ?? `stt failed (${res.status})`);
           }
           const data: { transcript: string; confidence: number } = await res.json();
-          if (!data.transcript) throw new Error("no transcript produced");
+          if (!data.transcript) {
+            // No speech detected — in continuous mode, listen again (bounded) instead of surfacing an error.
+            if (continuousModeRef.current && silentRetriesRef.current < MAX_SILENT_RETRIES) {
+              silentRetriesRef.current += 1;
+              setStage("idle");
+              setBusy(false);
+              setTimeout(() => startRecordingRef.current(), 400);
+              return;
+            }
+            if (continuousModeRef.current) {
+              setContinuousMode(false);
+              setError("Continuous mode paused — no speech detected. Click Record to continue.");
+            } else {
+              throw new Error("no transcript produced");
+            }
+            setStage("idle");
+            setBusy(false);
+            return;
+          }
+          silentRetriesRef.current = 0;
           setTranscript(data.transcript);
+          setBusy(false);
           await submitTurn(data.transcript, data.confidence);
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e));
-        } finally {
+          setStage("idle");
           setBusy(false);
         }
       };
       mediaRecorderRef.current = mr;
       mr.start();
       setRecording(true);
+      setStage("recording");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [submitTurn]);
 
+  useEffect(() => {
+    startRecordingRef.current = () => {
+      startRecording();
+    };
+  }, [startRecording]);
+
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop();
     setRecording(false);
   }, []);
+
+  const toggleContinuousMode = useCallback(() => {
+    setContinuousMode((prev) => {
+      const next = !prev;
+      if (next) {
+        silentRetriesRef.current = 0;
+        setError(null);
+        if (!recording && !busy && !isPlaying) {
+          setTimeout(() => startRecordingRef.current(), 150);
+        }
+      }
+      return next;
+    });
+  }, [recording, busy, isPlaying]);
 
   useEffect(() => {
     return () => {
@@ -187,6 +272,35 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
         </div>
       )}
 
+      {/* Live Engine Dashboard */}
+      <section className="flex flex-col gap-4 bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)]">
+              Live Pipeline
+            </span>
+            {continuousMode && (
+              <span className="flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-accent-violet)]">
+                <Repeat className="w-3 h-3 animate-pulse" /> Continuous
+              </span>
+            )}
+          </div>
+          <PipelineTracker stage={stage} />
+        </div>
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2">
+            Emotion Engine — HF / Lexicon / Local ONNX / Acoustic
+          </div>
+          <EngineDiagnosticPanel diagnostics={diagnostics} />
+        </div>
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2">
+            Emotion Timeline (this session)
+          </div>
+          <EmotionTimeline history={emotionHistory} />
+        </div>
+      </section>
+
       {/* Input Area */}
       <div className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-2 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
         <textarea
@@ -209,7 +323,7 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
                   </div>
                 ) : busy ? (
                   <div className="flex items-center gap-2 text-[var(--color-accent-cyan)] font-mono text-[10px] font-bold uppercase tracking-widest">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Processing
+                    <Loader2 className="w-3 h-3 animate-spin" /> {stage === "transcribing" ? "Transcribing" : "Thinking"}
                   </div>
                 ) : isPlaying ? (
                   <div className="flex items-center gap-2 text-[var(--color-accent-violet)] font-mono text-[10px] font-bold uppercase tracking-widest">
@@ -222,11 +336,24 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
 
           <div className="flex gap-2">
             <button
+              onClick={toggleContinuousMode}
+              title="Automatically listen again after each reply — a continuous back-and-forth conversation loop"
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] font-semibold transition-all ${
+                continuousMode
+                  ? "bg-[var(--color-accent-violet)]/15 border border-[var(--color-accent-violet)]/50 text-[var(--color-accent-violet)]"
+                  : "bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]"
+              }`}
+            >
+              <Repeat className="w-4 h-4" />
+              <span className="hidden sm:inline">Continuous</span>
+            </button>
+
+            <button
               onClick={recording ? stopRecording : startRecording}
               disabled={busy && !recording}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all ${
-                recording 
-                  ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:bg-red-600" 
+                recording
+                  ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:bg-red-600"
                   : "bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[var(--color-text-primary)] hover:border-[var(--color-border-active)]"
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
