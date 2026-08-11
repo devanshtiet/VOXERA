@@ -52,7 +52,7 @@ function LandingNav() {
         </nav>
 
         {/* CTA */}
-        <Link href="/onboarding" className="lp-nav-cta">Get Template</Link>
+        <Link href="/signup" className="lp-nav-cta">Get Template</Link>
       </div>
     </header>
   );
@@ -96,7 +96,7 @@ function HeroSection() {
         {/* CTA */}
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.26, ease: "easeOut" }}>
-          <Link href="/onboarding" className="lp-cta-btn">
+          <Link href="/signup" className="lp-cta-btn">
             Get Started Free <ChevronRight size={15} strokeWidth={2.5} />
           </Link>
         </motion.div>
@@ -408,7 +408,7 @@ function TrendingSection() {
             <p className="lp-trending-banner-sub">
               When your call volume grows, VOXERA adapts — handling every caller with context, care, and intelligence.
             </p>
-            <Link href="/onboarding" className="lp-trending-btn">Learn More →</Link>
+            <Link href="/signup" className="lp-trending-btn">Learn More →</Link>
           </div>
 
           {/* Pricing cards floating on the right */}

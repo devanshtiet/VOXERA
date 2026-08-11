@@ -36,7 +36,13 @@ interface TurnEntry {
   trace: TurnTrace;
 }
 
-export function VoiceAgent() {
+interface VoiceAgentProps {
+  sessionId?: string;
+  clientId?: string;
+  userId?: string;
+}
+
+export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}) {
   const [transcript, setTranscript] = useState("");
   const [history, setHistory] = useState<TurnEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -64,7 +70,7 @@ export function VoiceAgent() {
         const res = await fetch("/api/turn", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript: text, sttConfidence }),
+          body: JSON.stringify({ transcript: text, sttConfidence, sessionId, clientId, userId }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -94,7 +100,7 @@ export function VoiceAgent() {
         setBusy(false);
       }
     },
-    [busy],
+    [busy, sessionId, clientId, userId],
   );
 
   const startRecording = useCallback(async () => {
@@ -146,12 +152,41 @@ export function VoiceAgent() {
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
+      if (sessionId) {
+        navigator.sendBeacon?.(
+          "/api/session/end",
+          new Blob([JSON.stringify({ sessionId })], { type: "application/json" })
+        );
+      }
     };
-  }, []);
+  }, [sessionId]);
+
+  const endCall = useCallback(() => {
+    if (!sessionId) return;
+    fetch("/api/session/end", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {});
+  }, [sessionId]);
 
   return (
     <div className="flex flex-col gap-6">
-      
+      {sessionId && (
+        <div className="flex items-center justify-between rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] px-4 py-3">
+          <div className="flex items-center gap-2 text-[12px] font-mono text-[var(--color-text-secondary)]">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Live call · visible in the admin dashboard
+          </div>
+          <button
+            onClick={endCall}
+            className="text-[12px] font-semibold text-red-400 hover:text-red-300 transition-colors"
+          >
+            End Call
+          </button>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-2 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
         <textarea

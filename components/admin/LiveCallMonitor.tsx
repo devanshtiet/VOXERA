@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Activity, Radio, Volume2, ShieldAlert, Zap, MessageSquare } from "lucide-react";
+import { EmotionSparkline, type EmotionPoint } from "./EmotionSparkline";
+
+const MAX_HISTORY_POINTS = 60;
 
 interface LiveSessionState {
   sessionId: string;
@@ -18,6 +21,7 @@ export function LiveCallMonitor() {
   const [activeCalls, setActiveCalls] = useState<Array<{ id: string; callerNumber: string; startedAt: number }>>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [liveState, setLiveState] = useState<LiveSessionState | null>(null);
+  const [emotionHistory, setEmotionHistory] = useState<EmotionPoint[]>([]);
 
   // Fetch active call logs
   useEffect(() => {
@@ -55,6 +59,7 @@ export function LiveCallMonitor() {
       flags: {},
       transcript: [],
     });
+    setEmotionHistory([]);
 
     const es = new EventSource(`/api/session/${selectedSessionId}/stream`);
 
@@ -72,6 +77,16 @@ export function LiveCallMonitor() {
             updated.intensity = payload.data.intensity || 0;
             updated.confidence = payload.data.confidence || 0.5;
             updated.flags = payload.data.flags || {};
+            setEmotionHistory((hist) => [
+              ...hist.slice(-(MAX_HISTORY_POINTS - 1)),
+              {
+                ts: Date.now(),
+                v: payload.data.vad?.v ?? 0,
+                a: payload.data.vad?.a ?? 0,
+                intensity: payload.data.intensity || 0,
+                label: payload.data.label || "neutral",
+              },
+            ]);
           } else if (payload.type === "cai") {
             updated.caiScore = payload.data.score || 50;
             updated.caiCategory = payload.data.category || "Moderate Engagement";
@@ -135,14 +150,16 @@ export function LiveCallMonitor() {
       {activeCalls.length === 0 ? (
         <div className="text-center py-8 text-slate-500">
           <Volume2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No active phone calls streaming at the moment.</p>
-          <p className="text-xs text-slate-600 mt-1">Initiate a test call or receive a phone call to monitor live stream.</p>
+          <p>No active calls streaming at the moment.</p>
+          <p className="text-xs text-slate-600 mt-1">
+            <a href="/admin/try-call" className="text-indigo-400 hover:underline">Try a call</a> or receive a phone call to monitor the live stream.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Active Call Selector */}
           <div className="space-y-3 border-r border-slate-800 pr-6">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Active Telephony Calls</h3>
+            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Active Calls</h3>
             {activeCalls.map((call) => (
               <button
                 key={call.id}
@@ -194,6 +211,8 @@ export function LiveCallMonitor() {
                   </div>
                 </div>
               </div>
+
+              <EmotionSparkline history={emotionHistory} />
 
               {/* Active Emotion Pattern Flags */}
               {Object.values(liveState.flags).some(Boolean) && (

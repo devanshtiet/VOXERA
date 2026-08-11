@@ -23,12 +23,20 @@ export default function OnboardingSuccessPage() {
           Your AI agent has been initialized with the requested knowledge parameters and business rules. A member of our deployment team will reach out shortly to finalize the phone routing.
         </p>
 
-        <Link
-          href="/"
-          className="group flex items-center gap-2 px-6 py-3 rounded-full btn-gradient text-[14px] font-semibold text-white shadow-[0_0_15px_var(--color-accent-glow)] transition-all hover:scale-[1.03]"
-        >
-          Return to home <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/admin/try-call"
+            className="group flex items-center gap-2 px-6 py-3 rounded-full btn-gradient text-[14px] font-semibold text-white shadow-[0_0_15px_var(--color-accent-glow)] transition-all hover:scale-[1.03]"
+          >
+            Try a call with your new agent <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+          </Link>
+          <Link
+            href="/"
+            className="text-[14px] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            Return to home
+          </Link>
+        </div>
       </div>
     </main>
   );
