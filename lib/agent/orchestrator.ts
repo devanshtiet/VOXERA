@@ -31,6 +31,8 @@ export interface TurnInput {
   acousticFeatures?: AcousticFeatures;
   /** Issue #14: Number of barge-in interruptions detected during this turn. */
   bargeInCount?: number;
+  /** Per-call override for CONFIG.emotion.diagnosticMode — lets callers (e.g. the demo UI) opt into the full engine breakdown without changing the global production default. */
+  diagnostics?: boolean;
 }
 
 export interface TurnTrace {
@@ -155,7 +157,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
 
   // ── Phase 1 diagnostic instrumentation (off by default, see CONFIG.emotion.diagnosticMode) ──
   let emotionDiagnostics: DiagnosticEmotionResult | undefined;
-  if (CONFIG.emotion.diagnosticMode) {
+  if (input.diagnostics ?? CONFIG.emotion.diagnosticMode) {
     try {
       emotionDiagnostics = await runDiagnosticEmotion(input.transcript, input.acousticFeatures, {
         stm: sttHistory,
