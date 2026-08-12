@@ -48,6 +48,11 @@ wss.on("connection", async (ws: WebSocket) => {
 
   // Initialize Deepgram Live stream wrapper (16kHz — browser mic default)
   const dg = new DeepgramLiveWrapper((text, isFinal) => {
+    // Diagnostic: log every transcript Deepgram produces, not just finals,
+    // so we can tell "Deepgram is receiving audio but never finalizing" apart
+    // from "no audio is reaching Deepgram at all."
+    console.log(`[STT ${isFinal ? "FINAL" : "interim"}] "${text}"`);
+
     ws.send(
       JSON.stringify({
         type: isFinal ? "transcript_final" : "transcript_interim",
@@ -150,9 +155,22 @@ wss.on("connection", async (ws: WebSocket) => {
     return;
   }
 
+  // Diagnostic: confirm audio frames are actually arriving from the browser,
+  // and that DeepgramLiveWrapper's internal state is "connected" when we try
+  // to forward them (sendAudio silently drops frames otherwise).
+  let audioChunkCount = 0;
+  let audioByteCount = 0;
+
   // Handle incoming messages from the client (usually raw audio buffers)
   ws.on("message", (message) => {
     if (Buffer.isBuffer(message)) {
+      audioChunkCount++;
+      audioByteCount += message.length;
+      if (audioChunkCount === 1) {
+        console.log(`[Server] First audio chunk received (${message.length} bytes, dg state=${dg.getState()}).`);
+      } else if (audioChunkCount % 50 === 0) {
+        console.log(`[Server] ${audioChunkCount} audio chunks received (${audioByteCount} bytes total, dg state=${dg.getState()}).`);
+      }
       // It's raw binary audio -> pump to Deepgram, and accumulate for
       // turn-level acoustic feature extraction.
       dg.sendAudio(message);
