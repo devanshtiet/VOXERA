@@ -1,4 +1,4 @@
-import { VoiceAgent } from "../_components/VoiceAgent";
+import { DemoModeSwitcher } from "../_components/DemoModeSwitcher";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -28,7 +28,7 @@ export default function DemoPage() {
             Deepgram STT and TTS with hierarchical memory, policy routing, CAI, and emotion-aware retrieval.
           </p>
         </header>
-        <VoiceAgent />
+        <DemoModeSwitcher />
       </div>
     </main>
   );
