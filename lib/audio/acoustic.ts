@@ -31,6 +31,16 @@ const MIN_PAUSE_SAMPLES = Math.floor((MIN_PAUSE_MS / 1000) * SAMPLE_RATE);
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
+ * Convert RMS amplitude (0–32768 for 16-bit PCM) to dBFS (full-scale decibels).
+ * ~0 = clipping, more negative = quieter, clamped at -60 for near-silence.
+ */
+export function computeDecibels(rmsEnergy: number): number {
+  if (rmsEnergy <= 0) return -60;
+  const db = 20 * Math.log10(rmsEnergy / 32768);
+  return Math.max(-60, db);
+}
+
+/**
  * Compute RMS energy of a PCM buffer. Used for barge-in threshold checks.
  * Returns a value in the 0–32768 range for 16-bit audio.
  */
@@ -57,8 +67,9 @@ export function extractAcousticFeatures(pcm: Buffer, wordCount: number): Acousti
   const durationMs = (sampleCount / SAMPLE_RATE) * 1000;
 
   if (sampleCount < FRAME_SIZE) {
+    const rms = computeRmsEnergy(pcm);
     return {
-      rmsEnergy: computeRmsEnergy(pcm),
+      rmsEnergy: rms,
       zeroCrossingRate: 0,
       pitchHz: 0,
       pitchVariation: 0,
@@ -66,6 +77,7 @@ export function extractAcousticFeatures(pcm: Buffer, wordCount: number): Acousti
       pauseDurationMs: 0,
       pauseCount: 0,
       durationMs,
+      decibels: computeDecibels(rms),
     };
   }
 
@@ -132,6 +144,7 @@ export function extractAcousticFeatures(pcm: Buffer, wordCount: number): Acousti
     durationMs,
     energyModulationRate,
     pitchContour,
+    decibels: computeDecibels(rmsEnergy),
   };
 }
 

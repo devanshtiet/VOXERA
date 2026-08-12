@@ -27,7 +27,9 @@ import { classifyConfidence } from "./confidence";
  * - 5-8s = high (0.65–0.75)
  * - >8s with clear patterns = very high (up to 0.85)
  */
-export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | null {
+export function detectAudioEmotion(
+  features: AcousticFeatures
+): (EmotionSignal & { acousticSignalHint?: "crying" | "laughing" }) | null {
   // Minimum meaningful analysis requires at least 500ms of audio
   if (features.durationMs < 500) return null;
 
@@ -86,7 +88,7 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
 
   // ─── Scored label inference ────────────────────────────────────────────
 
-  const { label, patternStrength } = inferLabelScored({
+  const { label, patternStrength, signalHint } = inferLabelScored({
     energy: energyNorm,
     pitch: pitchNorm,
     pitchVariation: features.pitchVariation,
@@ -97,6 +99,10 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
     contour,
     pauseCount: features.pauseCount,
     vad,
+    // Very low amplitude is treated as a soft, contextual nudge toward several
+    // plausible "subdued" states at once (never a direct label mapping — see
+    // inferLabelScored) rather than a confident signal on its own.
+    quiet: energyNorm < 0.15,
   });
 
   // ─── Confidence based on audio duration + pattern clarity ──────────────
@@ -127,6 +133,7 @@ export function detectAudioEmotion(features: AcousticFeatures): EmotionSignal | 
     vad,
     source: "audio",
     at: Date.now(),
+    ...(signalHint ? { acousticSignalHint: signalHint } : {}),
   };
 }
 
@@ -143,6 +150,8 @@ interface NormalizedFeatures {
   contour: "rising" | "falling" | "flat" | "unstable";
   pauseCount: number;
   vad: VAD;
+  /** Very low amplitude — used only as a soft multi-label nudge, see below. */
+  quiet: boolean;
 }
 
 /**
@@ -151,7 +160,9 @@ interface NormalizedFeatures {
  * Returns the highest-scoring label and a pattern strength (0-1) indicating
  * how clear/distinctive the acoustic pattern is.
  */
-function inferLabelScored(f: NormalizedFeatures): { label: EmotionLabel; patternStrength: number } {
+function inferLabelScored(
+  f: NormalizedFeatures
+): { label: EmotionLabel; patternStrength: number; signalHint?: "crying" | "laughing" } {
   const scores: Record<EmotionLabel, number> = {
     neutral: 0,
     anger: 0,
@@ -223,11 +234,37 @@ function inferLabelScored(f: NormalizedFeatures): { label: EmotionLabel; pattern
   if (f.energy < 0.35 && f.rate < 0.4 && f.contour === "falling") scores.disappointment += 0.35;
   if (f.pitchVariation < 0.15 && f.energy < 0.3) scores.disappointment += 0.15;
 
+  // ── Gratitude: warm and calm — moderate-low energy, unhurried pace, gentle
+  // (not flat-monotone, not wildly variable) pitch, and a settling/falling
+  // contour. The `energyMod`/`zcr` ceilings are the key discriminator against
+  // laughter, which shares similar pitch/rate ranges but bursts rapidly —
+  // sincere warmth doesn't. `pauseRatio < 0.2` discriminates against
+  // confusion/hesitation, which shares the same quiet+slow range but is
+  // halting rather than fluent. Without this, gratitude was unreachable from
+  // audio alone (no rule ever added to its score), collapsing every warm/
+  // positive-but-calm utterance into "neutral" or "joy".
+  if (f.energy > 0.25 && f.energy < 0.55 && f.energyMod < 0.3 && f.pauseRatio < 0.2) scores.gratitude += 0.2;
+  if (f.rate < 0.5 && f.zcr < 0.2 && f.pauseRatio < 0.2) scores.gratitude += 0.15;
+  if (f.pitchVariation > 0.15 && f.pitchVariation < 0.4 && f.energyMod < 0.3 && f.pauseRatio < 0.2) scores.gratitude += 0.2;
+  if ((f.contour === "falling" || f.contour === "flat") && f.zcr < 0.2 && f.pauseRatio < 0.2) scores.gratitude += 0.15;
+  if (f.vad.v > 0.05 && f.energyMod < 0.25 && f.pauseRatio < 0.2) scores.gratitude += 0.15;
+
   // ── Neutral: low variation, moderate everything, no strong signals
   if (f.pitchVariation < 0.15 && f.vad.a < 0) scores.neutral += 0.3;
   if (f.energy > 0.2 && f.energy < 0.5 && f.rate > 0.3 && f.rate < 0.6) scores.neutral += 0.2;
   // Neutral gets a base score — it should win when nothing else is strong
   scores.neutral += 0.15;
+
+  // ── Low-volume ambiguity: quiet speech is contextually consistent with
+  // several negative/withdrawn states (subdued distress, fear, sadness,
+  // confusion) but is NOT, on its own, evidence for any single one of them —
+  // nudge all four candidates equally rather than asserting a specific label.
+  if (f.quiet) {
+    scores.sadness += 0.06;
+    scores.fear += 0.06;
+    scores.distress += 0.06;
+    scores.confusion += 0.06;
+  }
 
   // ── Find winner ─────────────────────────────────────────────────────────
   let bestLabel: EmotionLabel = "neutral";
@@ -249,5 +286,14 @@ function inferLabelScored(f: NormalizedFeatures): { label: EmotionLabel; pattern
     ? clamp((bestScore - secondBestScore) / bestScore, 0, 1)
     : 0;
 
-  return { label: bestLabel, patternStrength };
+  // Surface which specific acoustic pattern drove a distress/joy result, so
+  // the UI can show "crying" / "laughing" instead of just the mapped label.
+  let signalHint: "crying" | "laughing" | undefined;
+  if (bestLabel === "distress" && f.energyMod > 0.4 && f.pitch > 0.4) {
+    signalHint = "crying";
+  } else if (bestLabel === "joy" && f.zcr > 0.3 && f.energyMod > 0.4) {
+    signalHint = "laughing";
+  }
+
+  return { label: bestLabel, patternStrength, signalHint };
 }

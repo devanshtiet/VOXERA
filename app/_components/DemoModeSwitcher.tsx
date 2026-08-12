@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, AudioLines, PhoneCall, Radio } from "lucide-react";
+import { MessageSquare, AudioLines, PhoneCall, Radio, Phone } from "lucide-react";
 import { VoiceAgent } from "./VoiceAgent";
 import { AcousticDemo } from "./AcousticDemo";
 import { PhoneCallDemo } from "./PhoneCallDemo";
-import { RealtimeVoiceCall } from "./RealtimeVoiceCall";
 
 type DemoMode = "text" | "live" | "acoustic" | "phone";
 
@@ -15,6 +14,30 @@ const MODES: { key: DemoMode; label: string; desc: string; icon: React.ReactNode
   { key: "acoustic", label: "Acoustic", desc: "Microphone analysis", icon: <AudioLines className="w-[15px] h-[15px]" /> },
   { key: "phone", label: "Phone Call", desc: "Real call, live transcript", icon: <PhoneCall className="w-[15px] h-[15px]" /> },
 ];
+
+function LiveCallPanel() {
+  return (
+    <div className="voxera-console flex flex-col items-center justify-center gap-4 rounded-2xl shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)] px-6 py-14 text-center">
+      <span className="flex items-center justify-center w-12 h-12 rounded-full bg-[var(--console-violet)]/15 text-[var(--console-violet)]">
+        <Radio className="w-5 h-5" />
+      </span>
+      <div>
+        <div className="text-[15px] font-bold text-[var(--console-text)]">Live Call now lives in the test drawer</div>
+        <p className="text-[12.5px] text-[var(--console-text-dim)] max-w-[360px] mt-1.5 leading-relaxed">
+          Continuous WebSocket streaming, real barge-in, and per-turn engine diagnostics attached to
+          every line of the transcript — open it from the button in the corner of the screen, on
+          any page.
+        </p>
+      </div>
+      <button
+        onClick={() => window.dispatchEvent(new Event("voxera:open-test-drawer"))}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--console-violet)] text-[#0A0C14] text-[13px] font-semibold hover:brightness-110 transition-all"
+      >
+        <Phone className="w-4 h-4" /> Talk to the agent
+      </button>
+    </div>
+  );
+}
 
 export function DemoModeSwitcher() {
   const [mode, setMode] = useState<DemoMode>("text");
@@ -44,7 +67,7 @@ export function DemoModeSwitcher() {
       </div>
 
       {mode === "text" && <VoiceAgent showExamples />}
-      {mode === "live" && <RealtimeVoiceCall />}
+      {mode === "live" && <LiveCallPanel />}
       {mode === "acoustic" && <AcousticDemo />}
       {mode === "phone" && <PhoneCallDemo />}
     </div>

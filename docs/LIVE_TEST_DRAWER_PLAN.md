@@ -1,6 +1,12 @@
 # VOXERA — Live Test Drawer (Vapi-style realtime testing widget)
 
-Status: **planning only — not yet implemented**. This document is the spec to build against.
+Status: **implemented** (2026-08-12). See `app/_components/TestAgentDrawer.tsx`,
+`app/_components/useVoiceActivityDetection.ts`, and the `server.ts` diagnostics/barge-in changes.
+All three assumptions in §6 were confirmed and built as stated: site-wide trigger, full
+replacement of the old Live Call tab, and self-hosted VAD assets — the last one turned out to be
+mandatory rather than a preference, since `@ricky0123/vad-web` resolves its asset path relative to
+the page origin in a bundler context like Next.js, not a CDN by default. See `public/vad/README`
+(inline comment in the hook) for the exact file set (~15MB: ONNX model + WASM runtime + worklet).
 
 ## 1. What we're building
 

@@ -147,6 +147,8 @@ export interface AcousticFeatures {
   energyModulationRate?: number;
   /** Overall pitch contour direction across the utterance. */
   pitchContour?: "rising" | "falling" | "flat" | "unstable";
+  /** Loudness in dBFS (full-scale), roughly -60 (near-silent) to 0 (clipping). Derived from rmsEnergy. */
+  decibels?: number;
 }
 
 /**

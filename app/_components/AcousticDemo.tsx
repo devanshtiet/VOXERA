@@ -19,6 +19,7 @@ interface AcousticFeatures {
   durationMs: number;
   energyModulationRate?: number;
   pitchContour?: "rising" | "falling" | "flat" | "unstable";
+  decibels?: number;
 }
 
 interface AcousticEmotion {
@@ -27,11 +28,13 @@ interface AcousticEmotion {
   confidence: number;
   vad: { v: number; a: number; d: number };
   source: string;
+  acousticSignalHint?: "crying" | "laughing";
 }
 
 interface AnalyzeResult {
   features: AcousticFeatures;
   emotion: AcousticEmotion | null;
+  latencyMs: number;
 }
 
 const TEST_PROMPTS = [
@@ -55,7 +58,7 @@ function downsampleTo8kMono(input: Float32Array, inputSampleRate: number): Int16
 }
 
 export function AcousticDemo() {
-  const [micSupported, setMicSupported] = useState(true);
+  const [micSupported, setMicSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -237,12 +240,24 @@ export function AcousticDemo() {
                 </div>
                 {result.emotion ? (
                   <>
-                    <div className="text-[20px] font-bold capitalize text-[var(--console-text)]">{result.emotion.label}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-[20px] font-bold capitalize text-[var(--console-text)]">{result.emotion.label}</div>
+                      {result.emotion.acousticSignalHint && (
+                        <span className="text-[9.5px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded bg-[var(--console-violet)]/15 text-[var(--console-violet)] border border-[var(--console-violet)]/30">
+                          {result.emotion.acousticSignalHint === "crying" ? "crying detected" : "laughing detected"}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[11.5px] text-[var(--console-text-dim)] mt-1">
                       {(result.emotion.confidence * 100).toFixed(0)}% confidence · intensity {result.emotion.intensity.toFixed(2)}
                     </div>
                     <div className="text-[10.5px] font-mono text-[var(--console-text-dim)] mt-2">
                       VAD {result.emotion.vad.v.toFixed(2)} / {result.emotion.vad.a.toFixed(2)} / {result.emotion.vad.d.toFixed(2)}
+                    </div>
+                    <div className="text-[9.5px] text-[var(--console-text-dim)] mt-3 leading-snug italic">
+                      Importance and memory classification only apply during a full conversational
+                      turn (they factor in retrieval + policy context) — this demo calls the acoustic
+                      engine directly, so they're not shown here.
                     </div>
                   </>
                 ) : (
@@ -251,11 +266,15 @@ export function AcousticDemo() {
               </div>
 
               <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-surface)] p-4">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] mb-2">
-                  Raw Acoustic Features
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">
+                    Raw Acoustic Features
+                  </div>
+                  <div className="text-[9.5px] font-mono text-[var(--console-text-dim)]">{result.latencyMs.toFixed(1)}ms</div>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[11.5px]">
                   <FeatureCell label="Energy (RMS)" value={result.features.rmsEnergy.toFixed(0)} />
+                  <FeatureCell label="Loudness (dBFS)" value={result.features.decibels !== undefined ? result.features.decibels.toFixed(1) : "—"} />
                   <FeatureCell label="Energy Modulation" value={result.features.energyModulationRate?.toFixed(2) ?? "—"} />
                   <FeatureCell label="Pitch (Hz)" value={result.features.pitchHz > 0 ? result.features.pitchHz.toFixed(0) : "unvoiced"} />
                   <FeatureCell label="Pitch Contour" value={result.features.pitchContour ?? "—"} />
@@ -276,15 +295,15 @@ export function AcousticDemo() {
         </div>
       )}
 
-      <section className="rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] p-5">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-3">
+      <section className="voxera-console rounded-2xl p-5">
+        <div className="voxera-console-label text-[10px] font-bold mb-3">
           Manual Test Cases
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
           {TEST_PROMPTS.map((p) => (
-            <div key={p.label} className="rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] p-3">
-              <div className="text-[12px] font-bold text-[var(--color-text-primary)]">{p.label}</div>
-              <div className="text-[10.5px] text-[var(--color-text-muted)] mt-1 leading-snug">{p.hint}</div>
+            <div key={p.label} className="rounded-lg bg-[var(--console-surface)] border border-[var(--console-border)] p-3">
+              <div className="text-[12px] font-bold text-[var(--console-text)]">{p.label}</div>
+              <div className="text-[10.5px] text-[var(--console-text-dim)] mt-1 leading-snug">{p.hint}</div>
             </div>
           ))}
         </div>

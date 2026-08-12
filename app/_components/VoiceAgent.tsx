@@ -75,7 +75,7 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
   const [recording, setRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [micSupported, setMicSupported] = useState(true);
+  const [micSupported, setMicSupported] = useState(false);
   const [stage, setStage] = useState<PipelineStage>("idle");
   const [diagnostics, setDiagnostics] = useState<DiagnosticEmotionResult | null>(null);
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
@@ -345,17 +345,19 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
         </div>
       </section>
 
-      {/* Input Console */}
-      <div className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
+      {/* Input Console — same dark instrument-panel language as the Live
+          Engine Console above it, so the two read as one continuous
+          console instead of a dark panel stacked on a mismatched light card. */}
+      <div className="voxera-console flex flex-col rounded-2xl shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)] overflow-hidden">
         {showExamples && (
           <div className="flex flex-wrap gap-1.5 px-5 pt-4">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-muted)] py-1">Try:</span>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] py-1">Try:</span>
             {EXAMPLE_INPUTS.map((example) => (
               <button
                 key={example}
                 type="button"
                 onClick={() => setTranscript(example)}
-                className="text-[11.5px] px-2.5 py-1 rounded-full bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)] transition-colors"
+                className="text-[11.5px] px-2.5 py-1 rounded-full bg-[var(--console-surface)] border border-[var(--console-border)] text-[var(--console-text-dim)] hover:border-[var(--console-border-active)] hover:text-[var(--console-text)] transition-colors"
               >
                 {example}
               </button>
@@ -366,30 +368,30 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
           placeholder="Type a message or press Record to speak…"
-          className="w-full bg-transparent border-0 focus:ring-0 px-5 pt-4 pb-2 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] resize-none min-h-[56px]"
+          className="w-full bg-transparent border-0 focus:ring-0 px-5 pt-4 pb-2 text-[14px] text-[var(--console-text)] placeholder:text-[var(--console-text-dim)] resize-none min-h-[56px]"
         />
 
         {/* Actions Bar */}
-        <div className="flex justify-between items-center gap-3 px-4 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-base)]/40">
+        <div className="flex justify-between items-center gap-3 px-4 py-3 border-t voxera-console-hairline bg-black/10">
           <div className="flex items-center min-w-0">
             {(busy || isPlaying || recording) ? (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)]">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--console-surface-raised)] border border-[var(--console-border)]">
                 {recording ? (
-                  <div className="flex items-center gap-2 text-red-500 font-mono text-[10px] font-bold uppercase tracking-widest">
+                  <div className="flex items-center gap-2 text-red-400 font-mono text-[10px] font-bold uppercase tracking-widest">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,1)]" /> Recording
                   </div>
                 ) : busy ? (
-                  <div className="flex items-center gap-2 text-[var(--color-accent-cyan)] font-mono text-[10px] font-bold uppercase tracking-widest">
+                  <div className="flex items-center gap-2 text-[var(--console-cyan)] font-mono text-[10px] font-bold uppercase tracking-widest">
                     <Loader2 className="w-3 h-3 animate-spin" /> {stage === "transcribing" ? "Transcribing" : "Thinking"}
                   </div>
                 ) : isPlaying ? (
-                  <div className="flex items-center gap-2 text-[var(--color-accent-violet)] font-mono text-[10px] font-bold uppercase tracking-widest">
+                  <div className="flex items-center gap-2 text-[var(--console-violet)] font-mono text-[10px] font-bold uppercase tracking-widest">
                     <Activity className="w-3 h-3 animate-pulse" /> Agent Speaking
                   </div>
                 ) : null}
               </div>
             ) : (
-              <span className="text-[11.5px] text-[var(--color-text-muted)] hidden sm:inline">Type, or press Record to speak</span>
+              <span className="text-[11.5px] text-[var(--console-text-dim)] hidden sm:inline">Type, or press Record to speak</span>
             )}
           </div>
 
@@ -399,8 +401,8 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
               title="Automatically listen again after each reply — a continuous back-and-forth conversation loop"
               className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] font-semibold transition-all ${
                 continuousMode
-                  ? "bg-[var(--color-accent-violet)]/15 border border-[var(--color-accent-violet)]/50 text-[var(--color-accent-violet)]"
-                  : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]"
+                  ? "bg-[var(--console-violet)]/20 border border-[var(--console-violet)]/50 text-[var(--console-violet)]"
+                  : "bg-[var(--console-surface-raised)] border border-[var(--console-border)] text-[var(--console-text-dim)] hover:border-[var(--console-border-active)]"
               }`}
             >
               <Repeat className="w-4 h-4" />
@@ -414,7 +416,7 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all ${
                 recording
                   ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:bg-red-600"
-                  : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] text-[var(--color-text-primary)] hover:border-[var(--color-border-active)]"
+                  : "bg-[var(--console-surface-raised)] border border-[var(--console-border)] text-[var(--console-text)] hover:border-[var(--console-border-active)]"
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               {recording ? <Square className="w-4 h-4 fill-current" /> : <Mic className="w-4 h-4" />}
@@ -458,22 +460,22 @@ function TurnCard({ entry }: { entry: TurnEntry }) {
     .map(([k]) => k);
     
   return (
-    <article className="rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] p-6 flex flex-col gap-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+    <article className="voxera-console rounded-2xl p-6 flex flex-col gap-5 shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)]">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-[var(--color-bg-base)] rounded-xl p-4 border border-[var(--color-border-subtle)] relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[var(--color-text-muted)]" />
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2">User</div>
-          <div className="text-[14px] text-[var(--color-text-primary)] leading-relaxed">{entry.user}</div>
+        <div className="bg-[var(--console-surface)] rounded-xl p-4 border border-[var(--console-border)] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[var(--console-text-dim)]" />
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--console-text-dim)] mb-2">User</div>
+          <div className="text-[14px] text-[var(--console-text)] leading-relaxed">{entry.user}</div>
         </div>
-        <div className="bg-[var(--color-bg-base)] rounded-xl p-4 border border-[var(--color-border-subtle)] relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[var(--color-accent-violet)] to-[var(--color-accent-cyan)]" />
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-accent-cyan)] mb-2">Agent</div>
-          <div className="text-[14px] text-[var(--color-text-primary)] leading-relaxed">{entry.reply}</div>
+        <div className="bg-[var(--console-surface)] rounded-xl p-4 border border-[var(--console-border)] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[var(--console-violet)] to-[var(--console-cyan)]" />
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--console-cyan)] mb-2">Agent</div>
+          <div className="text-[14px] text-[var(--console-text)] leading-relaxed">{entry.reply}</div>
         </div>
       </div>
 
-      <div className="border-t border-[var(--color-border-subtle)] pt-5">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-4">Acoustic Trace & Policy</div>
+      <div className="border-t voxera-console-hairline pt-5">
+        <div className="voxera-console-label text-[10px] font-bold mb-4">Acoustic Trace & Policy</div>
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 text-[12px]">
           <Cell label="Emotion" value={`${t.emotion.current.label} · ${t.emotion.current.intensity.toFixed(2)}`} highlight />
           <Cell
@@ -500,19 +502,19 @@ function TurnCard({ entry }: { entry: TurnEntry }) {
       </div>
 
       {t.cai && (
-        <div className="flex items-center gap-3 bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] rounded-xl p-3">
-          <div className="flex-none px-3 py-1.5 rounded-lg bg-[var(--color-accent-cyan)]/10 border border-[var(--color-accent-cyan)]/30 text-[var(--color-accent-cyan)] font-mono font-bold text-[12px]">
+        <div className="flex items-center gap-3 bg-[var(--console-surface)] border border-[var(--console-border)] rounded-xl p-3">
+          <div className="flex-none px-3 py-1.5 rounded-lg bg-[var(--console-cyan)]/10 border border-[var(--console-cyan)]/30 text-[var(--console-cyan)] font-mono font-bold text-[12px]">
             CAI {t.cai.score}
           </div>
-          <div className="text-[12px] text-[var(--color-text-secondary)] leading-snug">
-            <span className="font-semibold text-[var(--color-text-primary)]">{t.cai.category}:</span> {t.cai.explanation}
+          <div className="text-[12px] text-[var(--console-text-dim)] leading-snug">
+            <span className="font-semibold text-[var(--console-text)]">{t.cai.category}:</span> {t.cai.explanation}
           </div>
         </div>
       )}
 
-      <details className="text-[11px] text-[var(--color-text-muted)] group">
-        <summary className="cursor-pointer select-none font-mono tracking-widest uppercase hover:text-[var(--color-text-secondary)] transition-colors">Developer Logs · Retrieval & LLM</summary>
-        <pre className="mt-3 whitespace-pre-wrap break-words bg-[var(--color-bg-base)] p-4 rounded-xl border border-[var(--color-border-subtle)] text-[10px]">
+      <details className="text-[11px] text-[var(--console-text-dim)] group">
+        <summary className="cursor-pointer select-none font-mono tracking-widest uppercase hover:text-[var(--console-text)] transition-colors">Developer Logs · Retrieval & LLM</summary>
+        <pre className="mt-3 whitespace-pre-wrap break-words bg-[var(--console-surface)] p-4 rounded-xl border border-[var(--console-border)] text-[10px] text-[var(--console-text-dim)]">
           {JSON.stringify(
             {
               retrievalScores: t.retrieved.scores,
@@ -541,8 +543,8 @@ function confCategory(c: number): string {
 function Cell({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div className="flex flex-col gap-1">
-      <dt className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-muted)]">{label}</dt>
-      <dd className={`font-mono ${highlight ? 'text-[var(--color-accent-violet)] font-bold' : 'text-[var(--color-text-secondary)]'}`}>{value}</dd>
+      <dt className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">{label}</dt>
+      <dd className={`font-mono ${highlight ? 'text-[var(--console-violet)] font-bold' : 'text-[var(--console-text-dim)]'}`}>{value}</dd>
     </div>
   );
 }

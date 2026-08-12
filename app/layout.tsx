@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { TestAgentDrawer } from "./_components/TestAgentDrawer";
 
 /**
  * Fonts are vendored locally (app/fonts/) rather than fetched from Google
@@ -62,6 +63,7 @@ export default function RootLayout({
     <html lang="en" className={`${bricolage.variable} ${dmSans.variable} ${jetbrainsMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         {children}
+        <TestAgentDrawer />
       </body>
     </html>
   );
