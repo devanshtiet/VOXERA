@@ -203,24 +203,24 @@ export function PhoneCallDemo() {
       </section>
 
       {live && (
-        <section className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
+        <section className="voxera-console flex flex-col rounded-2xl shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)] overflow-hidden">
           <div className="px-5 pt-5 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-xl border border-[var(--color-accent-cyan)]/30 bg-[var(--color-accent-cyan)]/[0.05] p-4">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-secondary)] mb-1">Live Emotion</div>
-              <div className="text-[18px] font-bold capitalize text-[var(--color-text-primary)]">{live.emotionLabel}</div>
-              <div className="text-[11px] text-[var(--color-text-secondary)] mt-1">
+            <div className="rounded-xl border border-[var(--console-cyan)]/30 bg-[var(--console-cyan)]/[0.06] p-4">
+              <div className="voxera-console-label text-[10px] mb-1">Live Emotion</div>
+              <div className="text-[18px] font-bold capitalize text-[var(--console-text)]">{live.emotionLabel}</div>
+              <div className="text-[11px] text-[var(--console-text-dim)] mt-1">
                 {(live.confidence * 100).toFixed(0)}% conf · intensity {live.intensity.toFixed(2)}
               </div>
-              <div className="text-[10px] font-mono text-[var(--color-text-muted)] mt-1.5">
+              <div className="text-[10px] font-mono text-[var(--console-text-dim)] mt-1.5">
                 VAD {live.vad.v.toFixed(2)} / {live.vad.a.toFixed(2)} / {live.vad.d.toFixed(2)}
               </div>
             </div>
-            <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] p-4">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-secondary)] mb-1 flex items-center gap-1.5">
-                <Zap className="w-3 h-3 text-amber-500" /> Engagement (CAI)
+            <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-surface)] p-4">
+              <div className="voxera-console-label text-[10px] mb-1 flex items-center gap-1.5">
+                <Zap className="w-3 h-3 text-amber-400" /> Engagement (CAI)
               </div>
-              <div className="text-[18px] font-bold text-[var(--color-text-primary)]">{live.caiScore} <span className="text-[12px] font-normal text-[var(--color-text-muted)]">/ 100</span></div>
-              <div className="text-[11px] text-[var(--color-text-secondary)] mt-1">{live.caiCategory}</div>
+              <div className="text-[18px] font-bold text-[var(--console-text)]">{live.caiScore} <span className="text-[12px] font-normal text-[var(--console-text-dim)]">/ 100</span></div>
+              <div className="text-[11px] text-[var(--console-text-dim)] mt-1">{live.caiCategory}</div>
             </div>
           </div>
 
@@ -232,25 +232,25 @@ export function PhoneCallDemo() {
           )}
 
           <div className="px-5 pb-4">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-secondary)] mb-2">Emotion Timeline</div>
+            <div className="voxera-console-label text-[10px] mb-2">Emotion Timeline</div>
             <EmotionTimeline history={emotionHistory} />
           </div>
 
           <div className="px-5 pb-5">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-secondary)] mb-2 flex items-center gap-1.5">
+            <div className="voxera-console-label text-[10px] mb-2 flex items-center gap-1.5">
               <MessageSquare className="w-3 h-3" /> Live Transcript
             </div>
-            <div className="bg-[var(--color-bg-base)] rounded-xl p-3 border border-[var(--color-border-subtle)] max-h-56 overflow-y-auto space-y-2">
+            <div className="bg-[var(--console-surface)] rounded-xl p-3 border border-[var(--console-border)] max-h-56 overflow-y-auto space-y-2">
               {live.transcript.length === 0 ? (
-                <p className="text-[11.5px] text-[var(--color-text-muted)] italic">Waiting for the call to connect and the first turn…</p>
+                <p className="text-[11.5px] text-[var(--console-text-dim)] italic">Waiting for the call to connect and the first turn…</p>
               ) : (
                 live.transcript.map((t, idx) => (
                   <div
                     key={idx}
                     className={`text-[12.5px] p-2.5 rounded-lg ${
                       t.role === "user"
-                        ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]"
-                        : "bg-[var(--color-accent-violet)]/10 text-[var(--color-text-primary)] border border-[var(--color-accent-violet)]/20"
+                        ? "bg-[var(--console-surface-raised)] text-[var(--console-text)]"
+                        : "bg-[var(--console-violet)]/10 text-[var(--console-text)] border border-[var(--console-violet)]/20"
                     }`}
                   >
                     <span className="font-mono uppercase text-[9.5px] block opacity-60 mb-0.5">{t.role}</span>

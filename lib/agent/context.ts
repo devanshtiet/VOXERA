@@ -55,7 +55,7 @@ export function buildLLMContext(args: {
     "1. Answer ONLY using the EVIDENCE block + STM. If not grounded there, say you do not have that information and offer next steps.",
     "2. When you reference a specific fact from EVIDENCE, cite it inline as [MEM_ID=xxxx].",
     "3. Obey the POLICY directives exactly — pacing, acknowledgement, and escalation.",
-    "4. Voice-style: short sentences, natural prosody, ≤ 3 sentences unless detail was requested.",
+    "4. Voice-style: this is a live spoken phone call, not chat. Reply in 1-2 short sentences (under ~30 words) unless the caller explicitly asks for detail. Get straight to the point — no preamble like \"I understand that...\" or restating the question.",
     "5. Never invent ticket numbers, dates, account details, or policy facts.",
     "",
     clientBlock,

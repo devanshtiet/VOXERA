@@ -512,3 +512,62 @@ VOXERA is now capable of horizontal scaling. Critical telephony queues and state
 - `npx vitest run` → **194 tests passed, 0 failures** across 18 test files (including new detection suite)
 - `npm run build` → **Build succeeded**
 
+### 2026-08-12 — Real-Time WebSocket Conversation Mode + Dark-Mode CSS Fix
+
+**Objective**: Replace the demo's manual Record/Stop turn-taking with a genuinely continuous,
+low-latency voice conversation ("Live Call" mode), tighten LLM responses so replies don't feel
+laggy, and fix a reported dark-mode visibility bug on `/demo`.
+
+**Changes Implemented**:
+1. **`server.ts` wired to the full turn pipeline** (previously only echoed transcripts back,
+   `// TODO (Phase 2)`): on each Deepgram `is_final` transcript, calls `handleTurn()`
+   (`lib/agent/orchestrator.ts` — the same orchestrator used by telephony calls), sends the
+   reply text + emotion trace back over the WebSocket immediately, then synthesizes an MP3 reply
+   via `synthesize()` (`lib/deepgram/tts.ts`) and streams it back as a base64 `reply_audio`
+   message. One session per WebSocket connection (`browser-<nanoid>`), matching the pattern
+   already used by `TelephonyStreamHandler` (`lib/telephony/stream-handler.ts`) for real calls.
+2. **New `app/_components/RealtimeVoiceCall.tsx`** ("Live Call" mode in the `/demo` switcher):
+   continuous browser mic capture via Web Audio API (`AudioContext` + `ScriptProcessorNode`),
+   downsampled to 16kHz mono PCM and streamed as raw binary frames directly over the WebSocket
+   to `ws://localhost:3001` (or `NEXT_PUBLIC_REALTIME_WS_URL` if set) — no chunk-and-POST
+   round-trips, no manual Record button. Renders live interim transcript, a running chat-style
+   transcript of both sides, the detected emotion for the latest turn, and auto-plays the
+   assistant's reply audio the moment it arrives. Reuses the `getMicSupport`/`describeMicError`
+   helpers from `micUtils.ts` for consistent permission-error handling. Added as a 4th tab in
+   `DemoModeSwitcher.tsx` alongside Text / Acoustic / Phone Call.
+3. **Shorter, snappier LLM replies**: `CONFIG.llm.maxOutputTokens` reduced from `400` to `160`,
+   and the voice-style system instruction in `lib/agent/context.ts` tightened to "1-2 short
+   sentences (under ~30 words)... no preamble" — both apply globally (telephony calls and the
+   new Live Call mode benefit equally), since a real phone conversation shouldn't wait on
+   paragraph-length completions.
+4. **Dark-mode CSS visibility fix**: added `color-scheme: light` to `:root` in `app/globals.css`.
+   The site has no dark stylesheet — without this declaration, browsers on a dark-mode OS render
+   native UA chrome (notably default text/background colors on unstyled sub-parts of form
+   controls) using dark-mode defaults, which can collide with the site's explicit light
+   backgrounds and make text unreadable. Forcing `color-scheme: light` makes every native control
+   render light regardless of OS preference. Verified by emulating a dark OS color scheme in the
+   browser tool and confirming `/demo` still renders fully legible and light-themed.
+
+**Operational note — two processes required for Live Call mode**: `server.ts` (the WebSocket
+STT/LLM/TTS server, port 3001) is a **separate Node process** from the Next.js dev server (port
+3000). Both must be running locally for the "Live Call" tab to work:
+
+```bash
+npm run dev      # terminal 1 — Next.js app (port 3000)
+npm run server    # terminal 2 — realtime WS server (port 3001)
+```
+
+If `npm run server` isn't running, the Live Call tab shows a friendly inline error naming the
+command to run, rather than failing silently. Text, Acoustic, and Phone Call modes are unaffected
+and don't require the second process.
+
+**Validation Performed**:
+- `npx tsc --noEmit` → clean
+- `npm run lint` → **0 errors, 0 warnings**
+- `npx vitest run` → **251 tests passed** across 27 test files
+- `npm run build` → **Build succeeded**
+- Manual browser pass: all four `/demo` tabs render correctly (including under emulated
+  dark-OS color scheme); Live Call mode mounts cleanly with no console errors. The live mic
+  streaming loop and WS-driven turn loop require a real microphone and a running `server.ts`
+  process, both outside this sandbox — left for the user to verify end-to-end.
+

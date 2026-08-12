@@ -20,6 +20,25 @@
   --font-mono:    "JetBrains Mono", monospace;
 }
 
+/*
+ * This entire app is a single, deliberately light-only theme — there is no
+ * dark stylesheet. Without this, browsers on a dark-mode OS render native
+ * UA chrome (scrollbars, and — critically — default text/background colors
+ * for form controls like <input>/<textarea>/<select> that don't have every
+ * sub-part explicitly styled) using dark-mode defaults, which collides with
+ * our explicit light backgrounds and can make text invisible (dark text on
+ * a dark UA-painted control background, or vice versa). Forcing the color
+ * scheme fixes this for every element, not just the ones we remember to
+ * style by hand.
+ */
+:root {
+  color-scheme: light;
+}
+
+html {
+  background-color: #FAFBFF;
+}
+
 :root {
   --lp-bg: #FAFBFF;
   --lp-bg-surface: #F2F4FF;
@@ -37,6 +56,87 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
+   SIGNAL CONSOLE — dark instrument-panel treatment for the /demo page's
+   "Live Engine Console". The rest of the app is deliberately light and airy;
+   this is the one place that inverts to a near-black telemetry surface —
+   the visual reference is a mixing desk / oscilloscope readout, which is
+   the honest register for something showing live audio signal processing.
+   That contrast is the page's signature moment, not a decoration.
+   ════════════════════════════════════════════════════════════════════════════ */
+:root {
+  --console-bg: #0A0C14;
+  --console-surface: #12141F;
+  --console-surface-raised: #181B2A;
+  --console-border: rgba(139, 92, 246, 0.22);
+  --console-border-active: rgba(139, 92, 246, 0.5);
+  --console-text: #E7E7F5;
+  --console-text-dim: #7679A0;
+  --console-violet: #A78BFA;
+  --console-cyan: #22D3EE;
+}
+
+.voxera-console {
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(139,92,246,0.16), transparent 60%),
+    radial-gradient(ellipse 700px 400px at 100% 0%, rgba(34,211,238,0.10), transparent 55%),
+    var(--console-bg);
+  border: 1px solid var(--console-border);
+  color: var(--console-text);
+}
+
+.voxera-console-hairline {
+  border-color: rgba(139, 92, 246, 0.16);
+}
+
+.voxera-console-label {
+  font-family: var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--console-text-dim);
+}
+
+/* Signature element: an ambient waveform of bars that idles with a slow
+   breathing motion and snaps to a faster, brighter pulse while a turn is
+   live — a direct visual echo of the audio signal the page is about. */
+.voxera-waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+
+.voxera-waveform span {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--console-cyan), var(--console-violet));
+  animation: voxera-wave 1.6s ease-in-out infinite;
+  opacity: 0.85;
+}
+
+.voxera-waveform.is-idle span {
+  animation-duration: 3.2s;
+  opacity: 0.35;
+}
+
+.voxera-waveform span:nth-child(1) { height: 40%; animation-delay: -1.2s; }
+.voxera-waveform span:nth-child(2) { height: 90%; animation-delay: -0.9s; }
+.voxera-waveform span:nth-child(3) { height: 60%; animation-delay: -0.6s; }
+.voxera-waveform span:nth-child(4) { height: 100%; animation-delay: -0.3s; }
+.voxera-waveform span:nth-child(5) { height: 55%; animation-delay: -1.5s; }
+.voxera-waveform span:nth-child(6) { height: 80%; animation-delay: -0.15s; }
+.voxera-waveform span:nth-child(7) { height: 35%; animation-delay: -0.7s; }
+
+@keyframes voxera-wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voxera-waveform span { animation: none; transform: scaleY(0.7); }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
    GLOBAL BASE
    ════════════════════════════════════════════════════════════════════════════ */
 body {
@@ -49,7 +149,10 @@ body {
 
 /* Dark portal utilities */
 .text-gradient {
-  background: linear-gradient(135deg, #F0F0FF 0%, #7C3AED 50%, #06B6D4 100%);
+  /* Deep indigo → violet → cyan. Every stop has enough contrast to read on
+     this app's light backgrounds — a near-white start (the previous value)
+     is illegible on #FAFBFF and made half of every gradient heading vanish. */
+  background: linear-gradient(135deg, #3B1E8C 0%, #7C3AED 50%, #06B6D4 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
