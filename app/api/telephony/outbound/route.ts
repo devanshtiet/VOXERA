@@ -1,16 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { initiateOutboundCall } from "../../../../lib/telephony/twilio";
 import { supabase } from "../../../../lib/db/supabase";
+import { checkRateLimit } from "../../../../lib/telephony/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+const OUTBOUND_CALL_LIMIT = 1;
+const OUTBOUND_CALL_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
+function getClientIp(req: NextRequest): string {
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  if (forwardedFor) return forwardedFor.split(",")[0].trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
 
 /**
  * POST /api/telephony/outbound
  *
  * Initiates an outbound AI call to a destination phone number.
+ *
+ * This route has no user authentication (it's callable from the public
+ * /demo page), so it's rate-limited per-IP to prevent it being used to
+ * trigger unlimited real, cost-incurring Twilio calls.
  */
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rateLimit = await checkRateLimit(`ratelimit:outbound-call:${ip}`, OUTBOUND_CALL_LIMIT, OUTBOUND_CALL_WINDOW_MS);
+    if (!rateLimit.allowed) {
+      const retryAfterSec = Math.ceil((rateLimit.retryAfterMs ?? 0) / 1000);
+      return NextResponse.json(
+        { error: `Too many calls requested. Try again in ${retryAfterSec}s.`, retryAfterMs: rateLimit.retryAfterMs },
+        { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+      );
+    }
+
     const body = await req.json();
     const { to, clientId = "demo" } = body;
 

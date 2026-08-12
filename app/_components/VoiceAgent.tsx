@@ -10,6 +10,7 @@ import {
   type DiagnosticEmotionResult,
   type EmotionHistoryPoint,
 } from "./EngineDashboard";
+import { getMicSupport, describeMicError } from "./micUtils";
 
 interface TurnTrace {
   utterance: {
@@ -49,17 +50,32 @@ interface VoiceAgentProps {
   sessionId?: string;
   clientId?: string;
   userId?: string;
+  /** Show a row of curated ambiguous/difficult example inputs above the textarea (Text Demo mode only). */
+  showExamples?: boolean;
 }
+
+const EXAMPLE_INPUTS = [
+  "I'm feeling low",
+  "I lost my pencil",
+  "My pencil broke",
+  "Great. Just great.",
+  "I can't believe you did that",
+  "I'm fine",
+  "Whatever",
+  "That's okay",
+  "I don't care anymore",
+];
 
 const MAX_SILENT_RETRIES = 3;
 
-export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}) {
+export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceAgentProps = {}) {
   const [transcript, setTranscript] = useState("");
   const [history, setHistory] = useState<TurnEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [micSupported, setMicSupported] = useState(true);
   const [stage, setStage] = useState<PipelineStage>("idle");
   const [diagnostics, setDiagnostics] = useState<DiagnosticEmotionResult | null>(null);
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
@@ -70,6 +86,10 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
   const continuousModeRef = useRef(false);
   const silentRetriesRef = useRef(0);
   const startRecordingRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    setMicSupported(getMicSupport());
+  }, []);
 
   useEffect(() => {
     continuousModeRef.current = continuousMode;
@@ -148,6 +168,11 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
 
   const startRecording = useCallback(async () => {
     setError(null);
+    if (!getMicSupport()) {
+      setMicSupported(false);
+      setError("Microphone requires HTTPS (or localhost) and a browser that supports getUserMedia.");
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
@@ -205,7 +230,7 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
       setRecording(true);
       setStage("recording");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeMicError(e));
     }
   }, [submitTurn]);
 
@@ -312,6 +337,21 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
 
       {/* Input Console */}
       <div className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
+        {showExamples && (
+          <div className="flex flex-wrap gap-1.5 px-5 pt-4">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-muted)] py-1">Try:</span>
+            {EXAMPLE_INPUTS.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => setTranscript(example)}
+                className="text-[11.5px] px-2.5 py-1 rounded-full bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
@@ -359,7 +399,8 @@ export function VoiceAgent({ sessionId, clientId, userId }: VoiceAgentProps = {}
 
             <button
               onClick={recording ? stopRecording : startRecording}
-              disabled={busy && !recording}
+              disabled={(busy && !recording) || (!recording && !micSupported)}
+              title={!micSupported && !recording ? "Microphone requires HTTPS (or localhost) and a supported browser" : undefined}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all ${
                 recording
                   ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:bg-red-600"
