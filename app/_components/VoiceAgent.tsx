@@ -298,37 +298,47 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
       )}
 
       {/* Live Engine Console */}
-      <section className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--color-border-subtle)]">
+      <section className="voxera-console flex flex-col rounded-2xl shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)] overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b voxera-console-hairline">
           <div className="flex items-center gap-2.5">
-            <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--color-accent-violet)]/10 text-[var(--color-accent-violet)] flex-none">
+            <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--console-violet)]/15 text-[var(--console-violet)] flex-none">
               <Gauge className="w-4 h-4" />
             </span>
             <div>
-              <div className="text-[13px] font-bold text-[var(--color-text-primary)] leading-tight">Live Engine Console</div>
-              <div className="text-[10.5px] text-[var(--color-text-muted)]">Ground-truth view of every stage, every turn</div>
+              <div className="flex items-center gap-2">
+                <div className="text-[13px] font-bold text-[var(--console-text)] leading-tight">Live Engine Console</div>
+                <span className="flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-widest text-[var(--console-cyan)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--console-cyan)] animate-pulse shadow-[0_0_6px_var(--console-cyan)]" /> Live
+                </span>
+              </div>
+              <div className="text-[10.5px] text-[var(--console-text-dim)]">Ground-truth view of every stage, every turn</div>
             </div>
           </div>
-          {continuousMode && (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10 px-2.5 py-1 rounded-full flex-none">
-              <Repeat className="w-3 h-3 animate-pulse" /> Continuous
-            </span>
-          )}
+          <div className="flex items-center gap-3 flex-none">
+            {continuousMode && (
+              <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--console-violet)] bg-[var(--console-violet)]/10 px-2.5 py-1 rounded-full">
+                <Repeat className="w-3 h-3 animate-pulse" /> Continuous
+              </span>
+            )}
+            <div className={`voxera-waveform ${stage === "idle" ? "is-idle" : ""}`} aria-hidden="true">
+              <span /><span /><span /><span /><span /><span /><span />
+            </div>
+          </div>
         </div>
 
-        <div className="px-5 pt-5 pb-4 border-b border-[var(--color-border-subtle)]">
+        <div className="px-5 pt-5 pb-4 border-b voxera-console-hairline">
           <PipelineTracker stage={stage} />
         </div>
 
         <div className="px-5 pt-4 pb-1">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2.5">
+          <div className="voxera-console-label text-[10px] font-bold mb-2.5">
             Emotion Engines — HF / Lexicon / Local ONNX / Acoustic
           </div>
           <EngineDiagnosticPanel diagnostics={diagnostics} />
         </div>
 
         <div className="px-5 pt-4 pb-5">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-2.5">
+          <div className="voxera-console-label text-[10px] font-bold mb-2.5">
             Emotion Timeline — this session
           </div>
           <EmotionTimeline history={emotionHistory} />

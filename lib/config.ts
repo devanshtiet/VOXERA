@@ -45,7 +45,9 @@ export const CONFIG = {
       { name: "openai", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini", envKey: "OPENAI_API_KEY" },
     ] as Array<{ name: string; baseURL: string; model: string; envKey: string }>,
     maxInputTokens: 6000,
-    maxOutputTokens: 400,
+    // Kept tight for voice/realtime turns — long completions add seconds of
+    // TTS-wait latency and break the "feels like a phone call" pacing.
+    maxOutputTokens: 160,
   },
   taskCritical: [
     "payment",
