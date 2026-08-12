@@ -27,9 +27,11 @@ export async function POST(request: NextRequest) {
   const wordCount = wordCountHeader ? parseInt(wordCountHeader, 10) || 0 : 0;
 
   try {
+    const startedAt = performance.now();
     const features = extractAcousticFeatures(buf, wordCount);
     const emotion = detectAudioEmotion(features);
-    return Response.json({ features, emotion });
+    const latencyMs = performance.now() - startedAt;
+    return Response.json({ features, emotion, latencyMs });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({ error: message }, { status: 500 });

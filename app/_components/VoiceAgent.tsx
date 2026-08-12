@@ -75,7 +75,7 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
   const [recording, setRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [micSupported, setMicSupported] = useState(true);
+  const [micSupported, setMicSupported] = useState(false);
   const [stage, setStage] = useState<PipelineStage>("idle");
   const [diagnostics, setDiagnostics] = useState<DiagnosticEmotionResult | null>(null);
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);

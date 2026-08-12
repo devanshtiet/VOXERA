@@ -190,4 +190,98 @@ describe("Issue #28: Upgraded acoustic emotion engine", () => {
       expect(emotion!.confidence).toBeLessThanOrEqual(0.85);
     });
   });
+
+  describe("Issue: acoustic emotion coverage was imbalanced (5 reachable labels, gratitude dead)", () => {
+    it("classifies a warm, calm, sincere voice as gratitude (previously unreachable — no scoring rule ever added to it)", () => {
+      const warmVoice: AcousticFeatures = {
+        rmsEnergy: 2200, // moderate-low energy
+        zeroCrossingRate: 0.1, // low ZCR — distinguishes from laughter
+        pitchHz: 190,
+        pitchVariation: 0.25, // gentle, not flat, not wild
+        speakingRateWPM: 100, // unhurried
+        pauseDurationMs: 200,
+        pauseCount: 1,
+        durationMs: 4000,
+        energyModulationRate: 0.1, // steady — distinguishes from laughter's bursts
+        pitchContour: "falling", // settling, sincere tone
+      };
+      const emotion = detectAudioEmotion(warmVoice);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).toBe("gratitude");
+    });
+
+    it("still classifies laughter as joy, not gratitude, despite overlapping pitch/rate ranges", () => {
+      const laughter: AcousticFeatures = {
+        rmsEnergy: 2300,
+        zeroCrossingRate: 0.4,
+        pitchHz: 220,
+        pitchVariation: 0.35,
+        speakingRateWPM: 130,
+        pauseDurationMs: 0,
+        pauseCount: 0,
+        durationMs: 4000,
+        energyModulationRate: 0.6,
+        pitchContour: "flat",
+      };
+      const emotion = detectAudioEmotion(laughter);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).toBe("joy");
+      expect((emotion as any).acousticSignalHint).toBe("laughing");
+    });
+
+    it("tags a crying pattern with the acousticSignalHint 'crying'", () => {
+      const cryingVoice: AcousticFeatures = {
+        rmsEnergy: 3800,
+        zeroCrossingRate: 0.12,
+        pitchHz: 320,
+        pitchVariation: 0.55,
+        speakingRateWPM: 90,
+        pauseDurationMs: 900,
+        pauseCount: 5,
+        durationMs: 6000,
+        energyModulationRate: 0.65,
+        pitchContour: "unstable",
+      };
+      const emotion = detectAudioEmotion(cryingVoice);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).toBe("distress");
+      expect((emotion as any).acousticSignalHint).toBe("crying");
+    });
+
+    it("does not let very quiet speech deterministically map to one label — it nudges several subdued candidates instead", () => {
+      const quietVoice: AcousticFeatures = {
+        rmsEnergy: 400, // very quiet — energyNorm ~0.08, below the 0.15 "quiet" threshold
+        zeroCrossingRate: 0.08,
+        pitchHz: 150,
+        pitchVariation: 0.2,
+        speakingRateWPM: 90,
+        pauseDurationMs: 300,
+        pauseCount: 1,
+        durationMs: 4000,
+      };
+      const emotion = detectAudioEmotion(quietVoice);
+      expect(emotion).not.toBeNull();
+      // Should land on one of the plausible "subdued" states, not a hard assertion
+      // of a single deterministic label — this test only pins the *behavior*
+      // (no crash, a real signal-derived label) rather than a specific winner.
+      expect(["sadness", "fear", "distress", "confusion", "neutral"]).toContain(emotion!.label);
+    });
+  });
+
+  describe("decibels — new loudness feature on AcousticFeatures", () => {
+    it("computes a near-0 dBFS value for a loud, high-amplitude tone", () => {
+      const loud = generateSteadyPCM(200, 2000, 30000);
+      const features = extractAcousticFeatures(loud, 5);
+      expect(features.decibels).toBeDefined();
+      expect(features.decibels!).toBeGreaterThan(-6);
+      expect(features.decibels!).toBeLessThanOrEqual(0);
+    });
+
+    it("computes a strongly negative dBFS value for a very quiet tone", () => {
+      const quiet = generateSteadyPCM(200, 2000, 300);
+      const features = extractAcousticFeatures(quiet, 5);
+      expect(features.decibels).toBeDefined();
+      expect(features.decibels!).toBeLessThan(-20);
+    });
+  });
 });

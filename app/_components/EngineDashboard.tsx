@@ -27,7 +27,7 @@ export interface DiagnosticEmotionResult {
   acoustic: EngineDiagnostic | null;
   fusion: {
     textSelection: { engine: "hf" | "lexicon"; reason: string };
-    final: { label: string; confidence: number; source: string };
+    final: { label: string; confidence: number; source: string; vad: { v: number; a: number; d: number } };
   };
   totalLatencyMs: number;
 }
@@ -164,21 +164,39 @@ export function EngineDiagnosticPanel({ diagnostics }: { diagnostics: Diagnostic
       </div>
     );
   }
+  const { fusion } = diagnostics;
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      {/* Both HF and Lexicon (plus Local ONNX and Acoustic) stay visible here
+          regardless of which one was selected below — comparing engines is
+          the point of this panel, not just showing the winner. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
         <EngineCard engineKey="hf" d={diagnostics.hf} />
         <EngineCard engineKey="lexicon" d={diagnostics.lexicon} />
         <EngineCard engineKey="local_onnx" d={diagnostics.localOnnx} />
         <EngineCard engineKey="acoustic" d={diagnostics.acoustic} />
       </div>
-      <div className="flex items-center gap-2.5 rounded-xl bg-[var(--console-violet)]/[0.08] border border-[var(--console-violet)]/25 px-3.5 py-3">
-        <Sparkles className="w-3.5 h-3.5 text-[var(--console-violet)] flex-none" />
-        <span className="text-[11.5px] text-[var(--console-text-dim)] leading-snug">
-          <strong className="text-[var(--console-violet)] font-mono uppercase text-[10.5px] tracking-wide">{diagnostics.fusion.textSelection.engine}</strong>
-          {" selected — "}{diagnostics.fusion.textSelection.reason} → fused into{" "}
-          <strong className="text-[var(--console-text)] capitalize">{diagnostics.fusion.final.label}</strong>
-        </span>
+
+      <div>
+        <div className="voxera-console-label text-[10px] font-bold mb-2">Final Result</div>
+        <div className="flex items-center gap-3 rounded-xl bg-[var(--console-violet)]/[0.08] border border-[var(--console-violet)]/25 px-4 py-3.5">
+          <Sparkles className="w-4 h-4 text-[var(--console-violet)] flex-none" />
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono uppercase text-[10px] tracking-wide px-1.5 py-0.5 rounded bg-[var(--console-violet)]/20 text-[var(--console-violet)] font-bold">
+                {fusion.textSelection.engine} selected
+              </span>
+              <span className="text-[15px] font-bold capitalize text-[var(--console-text)]">{fusion.final.label}</span>
+              <span className="text-[10.5px] text-[var(--console-text-dim)]">
+                {(fusion.final.confidence * 100).toFixed(0)}% confidence
+              </span>
+            </div>
+            <div className="text-[11px] text-[var(--console-text-dim)] leading-snug">{fusion.textSelection.reason}</div>
+            <div className="text-[9.5px] font-mono text-[var(--console-text-dim)]">
+              VAD {fusion.final.vad.v.toFixed(2)} / {fusion.final.vad.a.toFixed(2)} / {fusion.final.vad.d.toFixed(2)}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

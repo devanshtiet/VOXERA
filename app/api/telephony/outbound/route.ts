@@ -45,6 +45,20 @@ export async function POST(req: NextRequest) {
     const host = req.headers.get("host") || "localhost:3000";
     const protocol = host.includes("localhost") ? "http" : "https";
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `${protocol}://${host}`;
+
+    // Twilio calls this webhook from the public internet — it can never reach
+    // localhost. Fail fast with an actionable message instead of silently
+    // placing a call Twilio will fail to connect (see docs/PHONE_CALL_DEMO_SETUP.md).
+    if (/localhost|127\.0\.0\.1/.test(baseUrl)) {
+      return NextResponse.json(
+        {
+          error:
+            "Outbound calls need a public URL Twilio can reach. Start ngrok (`ngrok http 3000`) and set NEXT_PUBLIC_BASE_URL to the ngrok URL in .env.local, then restart the dev server. See docs/PHONE_CALL_DEMO_SETUP.md.",
+        },
+        { status: 400 }
+      );
+    }
+
     const webhookUrl = `${baseUrl}/api/telephony/incoming`;
 
     const { callSid, status } = await initiateOutboundCall({

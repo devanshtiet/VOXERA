@@ -19,7 +19,29 @@ interface LiveState {
 
 const PHONE_RE = /^\+?[1-9]\d{7,14}$/;
 
+interface Country {
+  iso: string;
+  name: string;
+  dialCode: string;
+  /** Expected national significant number length. Omit for variable-length countries (generic 7-14 digit check applies instead). */
+  nsnLength?: number;
+}
+
+// India defaults first per product requirement — everything else alphabetical-ish by common demo usage.
+const COUNTRIES: Country[] = [
+  { iso: "IN", name: "India", dialCode: "+91", nsnLength: 10 },
+  { iso: "US", name: "United States", dialCode: "+1", nsnLength: 10 },
+  { iso: "CA", name: "Canada", dialCode: "+1", nsnLength: 10 },
+  { iso: "GB", name: "United Kingdom", dialCode: "+44", nsnLength: 10 },
+  { iso: "AU", name: "Australia", dialCode: "+61", nsnLength: 9 },
+  { iso: "AE", name: "United Arab Emirates", dialCode: "+971", nsnLength: 9 },
+  { iso: "SG", name: "Singapore", dialCode: "+65", nsnLength: 8 },
+  { iso: "DE", name: "Germany", dialCode: "+49" },
+  { iso: "FR", name: "France", dialCode: "+33", nsnLength: 9 },
+];
+
 export function PhoneCallDemo() {
+  const [countryIdx, setCountryIdx] = useState(0); // India by default
   const [phoneNumber, setPhoneNumber] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [status, setStatus] = useState<CallStatus>("idle");
@@ -41,9 +63,21 @@ export function PhoneCallDemo() {
     setValidationError(null);
     setStatusMessage(null);
 
-    const normalized = phoneNumber.trim().replace(/[\s()-]/g, "");
+    const country = COUNTRIES[countryIdx];
+    const localDigits = phoneNumber.trim().replace(/\D/g, "");
+
+    if (!localDigits) {
+      setValidationError(`Enter a phone number (without the ${country.dialCode} country code — that's added automatically).`);
+      return;
+    }
+    if (country.nsnLength && localDigits.length !== country.nsnLength) {
+      setValidationError(`${country.name} numbers are ${country.nsnLength} digits — you entered ${localDigits.length}.`);
+      return;
+    }
+
+    const normalized = `${country.dialCode}${localDigits}`;
     if (!PHONE_RE.test(normalized)) {
-      setValidationError("Enter a valid phone number in international format, e.g. +15551234567.");
+      setValidationError("That doesn't look like a valid phone number — check the digits and try again.");
       return;
     }
 
@@ -138,7 +172,7 @@ export function PhoneCallDemo() {
       setStatus("error");
       setStatusMessage(e instanceof Error ? e.message : "Failed to initiate call.");
     }
-  }, [phoneNumber, closeStream]);
+  }, [phoneNumber, countryIdx, closeStream]);
 
   const endCall = useCallback(() => {
     closeStream();
@@ -164,14 +198,29 @@ export function PhoneCallDemo() {
         <div className="p-5 flex flex-col gap-3">
           {status !== "live" && (
             <div className="flex flex-col sm:flex-row gap-2.5">
-              <input
-                type="tel"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                placeholder="+15551234567"
-                disabled={status === "connecting"}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-active)] disabled:opacity-50"
-              />
+              <div className="flex flex-1 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] overflow-hidden focus-within:border-[var(--color-border-active)]">
+                <select
+                  value={countryIdx}
+                  onChange={(e) => setCountryIdx(Number(e.target.value))}
+                  disabled={status === "connecting"}
+                  aria-label="Country code"
+                  className="px-3 py-2.5 bg-transparent border-r border-[var(--color-border-subtle)] text-[13px] text-[var(--color-text-primary)] focus:outline-none disabled:opacity-50"
+                >
+                  {COUNTRIES.map((c, i) => (
+                    <option key={c.iso} value={i}>
+                      {c.name} ({c.dialCode})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d\s]/g, ""))}
+                  placeholder={COUNTRIES[countryIdx].nsnLength ? "9876543210" : "phone number"}
+                  disabled={status === "connecting"}
+                  className="flex-1 min-w-0 px-4 py-2.5 bg-transparent text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none disabled:opacity-50"
+                />
+              </div>
               <button
                 onClick={placeCall}
                 disabled={status === "connecting" || !phoneNumber.trim()}

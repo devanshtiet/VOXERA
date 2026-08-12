@@ -30,7 +30,7 @@ function downsampleTo16kMono(input: Float32Array, inputSampleRate: number): Int1
 }
 
 export function RealtimeVoiceCall() {
-  const [micSupported, setMicSupported] = useState(true);
+  const [micSupported, setMicSupported] = useState(false);
   const [status, setStatus] = useState<CallStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
