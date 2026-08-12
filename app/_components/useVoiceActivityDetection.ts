@@ -31,7 +31,7 @@ export function useVoiceActivityDetection() {
 
   const start = useCallback(async (
     handlers: VoiceActivityHandlers,
-    shared?: { stream: MediaStream; audioContext: AudioContext }
+    shared?: { stream: MediaStream }
   ) => {
     handlersRef.current = handlers;
 
@@ -45,11 +45,16 @@ export function useVoiceActivityDetection() {
       model: "v5",
       baseAssetPath: "/vad/",
       onnxWASMBasePath: "/vad/",
-      // Reuse the caller's mic stream/AudioContext (already open for PCM
-      // capture) instead of a second independent getUserMedia() call.
+      // Reuse the caller's already-open mic MediaStream (avoids a second
+      // getUserMedia prompt) but let VAD create and own its own
+      // AudioContext. Sharing one AudioContext between our raw-PCM
+      // ScriptProcessorNode pipeline and VAD's AudioWorkletNode caused
+      // "Failed to construct 'AudioWorkletNode': No execution context
+      // available" — mixing the legacy ScriptProcessor and modern
+      // AudioWorklet subsystems on one context is fragile. Two contexts on
+      // the same stream is a normal, well-supported pattern.
       ...(shared
         ? {
-            audioContext: shared.audioContext,
             getStream: async () => shared.stream,
             pauseStream: async () => {},
             resumeStream: async (s: MediaStream) => s,

@@ -293,7 +293,7 @@ export function TestAgentDrawer() {
 
       await vad.start(
         { onSpeechStart: bargeIn },
-        { stream, audioContext }
+        { stream }
       );
     } catch (e) {
       setError(describeMicError(e));
