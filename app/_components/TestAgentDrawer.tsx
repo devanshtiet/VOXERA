@@ -59,7 +59,7 @@ export function TestAgentDrawer() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const micAudioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const captureNodeRef = useRef<AudioWorkletNode | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -133,13 +133,14 @@ export function TestAgentDrawer() {
     active.current = false;
     stopLevelLoop();
     vad.destroy();
-    processorRef.current?.disconnect();
+    captureNodeRef.current?.port.close();
+    captureNodeRef.current?.disconnect();
     micSourceRef.current?.disconnect();
     micAnalyserRef.current?.disconnect();
     micAudioContextRef.current?.close().catch(() => {});
     streamRef.current?.getTracks().forEach((t) => t.stop());
     wsRef.current?.close();
-    processorRef.current = null;
+    captureNodeRef.current = null;
     micSourceRef.current = null;
     micAnalyserRef.current = null;
     micAudioContextRef.current = null;
@@ -275,25 +276,34 @@ export function TestAgentDrawer() {
       source.connect(micAnalyser);
       micAnalyserRef.current = micAnalyser;
 
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-      processor.onaudioprocess = (event) => {
+      // AudioWorkletNode, not the deprecated ScriptProcessorNode — this
+      // context is shared with VAD below, and mixing the legacy
+      // ScriptProcessor and modern AudioWorklet subsystems on one context
+      // is what caused "Failed to construct AudioWorkletNode: No execution
+      // context available" previously. One consistent capture path avoids
+      // it, and also avoids the separate failure mode of two independent
+      // AudioContexts each opening their own MediaStreamAudioSourceNode on
+      // the same mic stream (unreliable across browsers — one can end up
+      // silently receiving silence instead of live audio).
+      await audioContext.audioWorklet.addModule("/audio-worklets/pcm-capture-processor.js");
+      const captureNode = new AudioWorkletNode(audioContext, "pcm-capture-processor");
+      captureNodeRef.current = captureNode;
+      captureNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (!active.current || ws.readyState !== WebSocket.OPEN) return;
-        const input = event.inputBuffer.getChannelData(0);
-        const downsampled = downsampleTo16kMono(input, audioContext.sampleRate);
+        const downsampled = downsampleTo16kMono(event.data, audioContext.sampleRate);
         ws.send(downsampled.buffer);
       };
-      source.connect(processor);
+      source.connect(captureNode);
       const silentGain = audioContext.createGain();
       silentGain.gain.value = 0;
-      processor.connect(silentGain);
+      captureNode.connect(silentGain);
       silentGain.connect(audioContext.destination);
 
       startLevelLoop();
 
       await vad.start(
         { onSpeechStart: bargeIn },
-        { stream }
+        { stream, audioContext }
       );
     } catch (e) {
       setError(describeMicError(e));
