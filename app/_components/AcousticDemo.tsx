@@ -295,15 +295,15 @@ export function AcousticDemo() {
         </div>
       )}
 
-      <section className="rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] p-5">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-3">
+      <section className="voxera-console rounded-2xl p-5">
+        <div className="voxera-console-label text-[10px] font-bold mb-3">
           Manual Test Cases
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
           {TEST_PROMPTS.map((p) => (
-            <div key={p.label} className="rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] p-3">
-              <div className="text-[12px] font-bold text-[var(--color-text-primary)]">{p.label}</div>
-              <div className="text-[10.5px] text-[var(--color-text-muted)] mt-1 leading-snug">{p.hint}</div>
+            <div key={p.label} className="rounded-lg bg-[var(--console-surface)] border border-[var(--console-border)] p-3">
+              <div className="text-[12px] font-bold text-[var(--console-text)]">{p.label}</div>
+              <div className="text-[10.5px] text-[var(--console-text-dim)] mt-1 leading-snug">{p.hint}</div>
             </div>
           ))}
         </div>

@@ -184,30 +184,30 @@ export function PhoneCallDemo() {
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="flex flex-col bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden">
-        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-[var(--color-border-subtle)]">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex-none">
+      <section className="voxera-console flex flex-col rounded-2xl shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)] overflow-hidden">
+        <div className="flex items-center gap-2.5 px-5 py-4 border-b voxera-console-hairline">
+          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/15 text-emerald-400 flex-none">
             <PhoneCall className="w-4 h-4" />
           </span>
           <div>
-            <div className="text-[13px] font-bold text-[var(--color-text-primary)] leading-tight">Phone Call Demo</div>
-            <div className="text-[10.5px] text-[var(--color-text-muted)]">Real outbound Twilio call — needs ngrok + Twilio configured locally</div>
+            <div className="text-[13px] font-bold text-[var(--console-text)] leading-tight">Phone Call Demo</div>
+            <div className="text-[10.5px] text-[var(--console-text-dim)]">Real outbound Twilio call — needs ngrok + Twilio configured locally</div>
           </div>
         </div>
 
         <div className="p-5 flex flex-col gap-3">
           {status !== "live" && (
             <div className="flex flex-col sm:flex-row gap-2.5">
-              <div className="flex flex-1 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] overflow-hidden focus-within:border-[var(--color-border-active)]">
+              <div className="flex flex-1 rounded-xl border border-[var(--console-border)] bg-[var(--console-surface)] overflow-hidden focus-within:border-[var(--console-border-active)]">
                 <select
                   value={countryIdx}
                   onChange={(e) => setCountryIdx(Number(e.target.value))}
                   disabled={status === "connecting"}
                   aria-label="Country code"
-                  className="px-3 py-2.5 bg-transparent border-r border-[var(--color-border-subtle)] text-[13px] text-[var(--color-text-primary)] focus:outline-none disabled:opacity-50"
+                  className="px-3 py-2.5 bg-transparent border-r border-[var(--console-border)] text-[13px] text-[var(--console-text)] focus:outline-none disabled:opacity-50"
                 >
                   {COUNTRIES.map((c, i) => (
-                    <option key={c.iso} value={i}>
+                    <option key={c.iso} value={i} className="bg-[var(--console-surface)] text-[var(--console-text)]">
                       {c.name} ({c.dialCode})
                     </option>
                   ))}
@@ -218,7 +218,7 @@ export function PhoneCallDemo() {
                   onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d\s]/g, ""))}
                   placeholder={COUNTRIES[countryIdx].nsnLength ? "9876543210" : "phone number"}
                   disabled={status === "connecting"}
-                  className="flex-1 min-w-0 px-4 py-2.5 bg-transparent text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none disabled:opacity-50"
+                  className="flex-1 min-w-0 px-4 py-2.5 bg-transparent text-[14px] text-[var(--console-text)] placeholder:text-[var(--console-text-dim)] focus:outline-none disabled:opacity-50"
                 />
               </div>
               <button
@@ -236,8 +236,8 @@ export function PhoneCallDemo() {
             <div
               className={`text-[12.5px] px-3.5 py-2.5 rounded-xl border ${
                 status === "error"
-                  ? "bg-red-950/30 border-red-900/50 text-red-400"
-                  : "bg-[var(--color-accent-cyan)]/[0.06] border-[var(--color-accent-cyan)]/25 text-[var(--color-text-secondary)]"
+                  ? "bg-red-950/40 border-red-900/60 text-red-300"
+                  : "bg-[var(--console-cyan)]/[0.08] border-[var(--console-cyan)]/25 text-[var(--console-text-dim)]"
               }`}
             >
               {statusMessage}

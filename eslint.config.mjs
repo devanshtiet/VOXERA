@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored @ricky0123/vad-web runtime assets (ONNX Runtime WASM glue,
+    // audio worklet) — self-hosted for the browser, not our source.
+    "public/vad/**",
   ]),
   {
     rules: {

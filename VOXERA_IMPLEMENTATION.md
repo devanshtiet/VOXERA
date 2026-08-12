@@ -571,3 +571,57 @@ and don't require the second process.
   streaming loop and WS-driven turn loop require a real microphone and a running `server.ts`
   process, both outside this sandbox — left for the user to verify end-to-end.
 
+### 2026-08-12 — Live Test Drawer (Vapi-style widget) + full console theme unification
+
+**Objective**: Implement `docs/LIVE_TEST_DRAWER_PLAN.md` — a site-wide, right-side drawer for
+holding a real voice conversation with the agent with real barge-in and per-turn diagnostics
+attached to the transcript — and fix a reported black/white theme mismatch across `/demo`.
+
+**Changes Implemented**:
+1. **`server.ts`**: added a per-connection `generation` counter incremented on a client `barge_in`
+   message; any reply already in flight when that happens is dropped instead of being spoken over
+   the user. Also turned on `diagnostics: true` on the `handleTurn()` call (previously only the
+   fused label reached the client, not the HF/Lexicon/Local ONNX/Acoustic breakdown) and now
+   accumulates per-turn PCM to run `extractAcousticFeatures()` before each turn, downsampled 16kHz
+   → 8kHz so the exact same DSP telephony calls use gets exercised here too.
+2. **New `app/_components/useVoiceActivityDetection.ts`**: thin wrapper around
+   `@ricky0123/vad-web` (Silero VAD, MIT). Shares the caller's existing `MediaStream`/
+   `AudioContext` via option overrides (`getStream`/`audioContext`) instead of opening a second
+   independent mic stream.
+3. **New `app/_components/TestAgentDrawer.tsx`**: the drawer itself, mounted once in
+   `app/layout.tsx` so its floating "Talk to the agent" trigger is available on every page. Signature
+   element is an orb driven by real Web Audio `AnalyserNode` amplitude in both directions (mic
+   input while listening, TTS playback while speaking) — never a decorative loop. VAD's
+   `onSpeechStart` while the agent is talking triggers an immediate client-side barge-in (pause
+   audio, send `{type:"barge_in"}`) before any server round trip. Each transcript turn carries its
+   own attached `EngineDiagnosticPanel` + CAI line rather than a separate dashboard bolted beside
+   the chat.
+4. **Retired `RealtimeVoiceCall.tsx`**: the `/demo` "Live Call" tab now shows a CTA that opens the
+   same drawer via a `window` custom event (`voxera:open-test-drawer`), rather than maintaining a
+   second parallel realtime-call implementation.
+5. **New dependency**: `@ricky0123/vad-web`. Its model/WASM/worklet assets are self-hosted under
+   `public/vad/` (~15MB, see `public/vad/README.md`) — the package resolves asset paths relative
+   to the page origin in a bundler context like Next.js, not a CDN, so this isn't optional.
+6. **Theme unification** (the reported "color coding, white/black theme, not matching" issue):
+   found and fixed several light (`--color-bg-elevated`) panels sitting directly beneath the dark
+   `.voxera-console` panels introduced in the previous pass — `VoiceAgent.tsx`'s input bar and
+   per-turn history card, `PhoneCallDemo.tsx`'s call-setup card, and `AcousticDemo.tsx`'s manual
+   test-case card. All converted to the same dark console tokens so each mode reads as one
+   continuous instrument instead of a light card stacked under a dark one.
+7. Excluded `public/vad/**` (vendored, not authored) from ESLint via `eslint.config.mjs`.
+
+**Validation Performed**:
+- `npx tsc --noEmit` → clean
+- `npm run lint` → **0 errors, 0 warnings**
+- `npx vitest run` → **257 tests passed** across 27 test files (unchanged by this pass — no new
+  server-side logic besides `server.ts`, which isn't unit-testable without a live Deepgram/Twilio
+  connection, consistent with the rest of that file's existing testing approach)
+- `npm run build` → **Build succeeded**
+- Manual browser pass: floating trigger renders and opens the drawer on both the landing page and
+  `/demo`; fixed a real z-index bug found during this pass where the landing page's own
+  `z-index: 100` header rendered over the drawer's top edge — the drawer/trigger/backdrop are now
+  `z-[105]`/`z-[110]`/`z-[100]` respectively. Mic-permission-denied path inside the drawer shows
+  the expected friendly error with no console errors. The `/demo` "Live Call" CTA correctly opens
+  the same drawer instance via the custom event. Full live mic + VAD + barge-in flow needs a real
+  microphone and a running `npm run server` — outside this sandbox, left for the user to verify.
+

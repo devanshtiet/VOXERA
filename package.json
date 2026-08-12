@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^5.0.0",
+    "@ricky0123/vad-web": "^0.0.30",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
     "@types/twilio": "^3.19.2",
@@ -27,6 +28,7 @@
     "nanoid": "^5.1.9",
     "next": "^16.2.12",
     "ogl": "^1.0.11",
+    "onnxruntime-web": "^1.14.0",
     "openai": "^6.42.0",
     "pdf-parse": "^2.4.5",
     "react": "19.2.4",

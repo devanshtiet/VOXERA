@@ -136,6 +136,60 @@ html {
   .voxera-waveform span { animation: none; transform: scaleY(0.7); }
 }
 
+/* ── The orb — the Test Agent drawer's signature element. Driven entirely by
+   a --level custom property (0–1) set from real audio amplitude, both
+   directions (mic input while listening, TTS playback while speaking) —
+   never a decorative loop. --hue switches the glow between listening
+   (violet) and speaking (cyan). ───────────────────────────────────────── */
+.voxera-orb {
+  --level: 0;
+  --hue: var(--console-violet);
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--hue) 55%, transparent), transparent 70%);
+  transition: background-color 0.4s ease;
+}
+
+.voxera-orb::before,
+.voxera-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1.5px solid color-mix(in srgb, var(--hue) 70%, transparent);
+  transform: scale(calc(0.72 + var(--level) * 0.5));
+  opacity: calc(0.5 + var(--level) * 0.5);
+  transition: border-color 0.4s ease;
+}
+
+.voxera-orb::after {
+  transform: scale(calc(0.9 + var(--level) * 0.85));
+  opacity: calc(0.25 + var(--level) * 0.4);
+}
+
+.voxera-orb-core {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  background: var(--hue);
+  box-shadow: 0 0 calc(12px + var(--level) * 40px) color-mix(in srgb, var(--hue) 80%, transparent);
+  transform: scale(calc(1 + var(--level) * 0.3));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0A0C14;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voxera-orb::before, .voxera-orb::after, .voxera-orb-core { transition: none; }
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    GLOBAL BASE
    ════════════════════════════════════════════════════════════════════════════ */
