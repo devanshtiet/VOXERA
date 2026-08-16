@@ -19,7 +19,12 @@ export const LEXICON: Array<{
   { kw: /\b(?:ridiculous|unacceptable|useless|pointless|waste of time)\b/ig, label: "frustration", vad: { v: -0.5, a: 0.6, d: 0.2 }, w: 0.8 },
 
   // ── Distress ───────────────────────────────────────────────────────────
-  { kw: /\b(?:desperate|help me|emergency|urgent|scared|afraid)\b/ig, label: "distress", vad: { v: -0.8, a: 0.8, d: -0.3 }, w: 1.0 },
+  // "help me" was removed from this pattern — it's an extremely common,
+  // mundane phrase ("can you help me book an appointment") that was
+  // falsely triggering maximum-severity distress + human-escalation on
+  // completely routine requests. "desperately need help", "please help me,
+  // I'm scared" etc. still match via the other words in this list.
+  { kw: /\b(?:desperate|emergency|urgent|scared|afraid)\b/ig, label: "distress", vad: { v: -0.8, a: 0.8, d: -0.3 }, w: 1.0 },
   { kw: /\b(?:suicid|harm myself|end it|die|kill myself|wanna die)\b/ig, label: "distress", vad: { v: -0.95, a: 0.9, d: -0.6 }, w: 1.5 },
 
   // ── Sadness ────────────────────────────────────────────────────────────

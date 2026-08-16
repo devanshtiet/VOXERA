@@ -488,7 +488,7 @@ export function TestAgentDrawer() {
               </div>
               {latestAssistantTurn?.diagnostics ? (
                 <>
-                  <EngineDiagnosticPanel diagnostics={latestAssistantTurn.diagnostics} />
+                  <EngineDiagnosticPanel diagnostics={latestAssistantTurn.diagnostics} compact />
                   {latestAssistantTurn.cai && (
                     <div className="mt-2 text-[10px] font-mono text-[var(--console-text-dim)]">
                       CAI {latestAssistantTurn.cai.score}/100 · {latestAssistantTurn.cai.category}

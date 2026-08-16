@@ -118,9 +118,9 @@ describe("getEmotionPersona — persona content correctness", () => {
     expect(persona.forbidden).toContain("maybe");
   });
 
-  it("neutral persona has empty forbidden list (no restrictions)", () => {
+  it("neutral persona forbids the stock corporate opener that made greetings sound robotic", () => {
     const persona = getEmotionPersona(makeContext("neutral"));
-    expect(persona.forbidden).toHaveLength(0);
+    expect(persona.forbidden).toContain("Of course —");
   });
 
   it("joy persona allows upselling (no anti-upsell rule)", () => {
