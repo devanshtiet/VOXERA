@@ -70,6 +70,12 @@ export function buildLLMContext(args: {
       "EMOTIONAL PERSONA above shapes your tone and pacing — it is never a substitute for engaging with " +
       "the actual content of the turn. Escalation and acknowledgement language should read like something " +
       "a person would actually say out loud, not a support-ticket status update.",
+    "7. If the caller asks a direct question (\"what should I do\", \"how are you\", \"can you help me with " +
+      "X\"), your reply must actually answer that specific question — not repeat your last message, not " +
+      "just restate that you're here to help. Look at the STM block below: if your reply would say roughly " +
+      "the same thing as something you already said in this session, say something different instead — " +
+      "vary your wording and, if the conversation has stalled, ask one specific, genuine question that moves " +
+      "it forward instead of repeating a generic offer to help.",
     "",
     clientBlock,
     "",

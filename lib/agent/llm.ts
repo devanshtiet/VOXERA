@@ -102,12 +102,32 @@ export async function generateReply(args: {
  * ever reach a caller's ears or the transcript.
  */
 export function sanitizeReply(text: string): string {
+  return humanizeEscalationLanguage(
+    text
+      .replace(/<function[^>]*>[\s\S]*?<\/function>/gi, "")
+      .replace(/<\/?function[^>]*>/gi, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+/**
+ * The persona/policy prompts explicitly forbid "tier 2", "specialist", and
+ * "escalate" — support-ticket words a real person would never say out loud
+ * — but LLM instruction-following on forbidden words isn't 100% reliable,
+ * especially for a fast/cheap model. This is a deterministic backstop: if
+ * one of those words slips through anyway, replace it with how a person
+ * would actually phrase handing off to a teammate, rather than let a
+ * caller hear "connect you with a senior specialist."
+ */
+function humanizeEscalationLanguage(text: string): string {
   return text
-    .replace(/<function[^>]*>[\s\S]*?<\/function>/gi, "")
-    .replace(/<\/?function[^>]*>/gi, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\b(a|an)\s+(senior\s+)?tier[\s-]?[12]\s+specialist\b/gi, "someone from the team")
+    .replace(/\b(a|an)\s+(senior\s+)?specialist\b/gi, "someone from the team")
+    .replace(/\btier[\s-]?[12]\b/gi, "the team")
+    .replace(/\bescalate(?:d)?\s+(?:your\s+issue\s+)?to\b/gi, "connect you with")
+    .replace(/\bescalate(?:d)?\b/gi, "loop in someone from the team");
 }
 
 function offlineFallback(userBlock: string): string {
