@@ -6,6 +6,7 @@ import { detectAudioEmotion } from "../emotion/audio-emotion";
 import { importanceScore, novelty, policyFlag, taskCriticality } from "../emotion/importance";
 import { calculateCAI, type CAIResult } from "../emotion/cai";
 import { runDiagnosticEmotion, type DiagnosticEmotionResult } from "../emotion/emotion-debug";
+import { detectTextEmotionLocalONNX } from "../emotion/local-onnx-detect";
 import { logSessionEvent, makeEvent } from "../logging/session-logger";
 import { emitSessionEvent } from "../realtime/emitter";
 import { retrieve, topScore } from "../memory/retrieval";
@@ -109,6 +110,13 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     };
   }
 
+  // Kick off Local ONNX concurrently with the production HF+Lexicon call
+  // below — it's only needed for the diagnostics breakdown further down,
+  // but starting it now (rather than after detectTextEmotion resolves)
+  // overlaps its latency with HF's instead of stacking on top of it.
+  const wantsDiagnostics = input.diagnostics ?? CONFIG.emotion.diagnosticMode;
+  const localOnnxPromise = wantsDiagnostics ? detectTextEmotionLocalONNX(input.transcript) : null;
+
   // ── Issue #14: Acoustic Emotion Analysis ────────────────────────────────
   const textEmoResult = await detectTextEmotion(input.transcript);
   const textEmo = textEmoResult.primary;
@@ -157,12 +165,13 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
 
   // ── Phase 1 diagnostic instrumentation (off by default, see CONFIG.emotion.diagnosticMode) ──
   let emotionDiagnostics: DiagnosticEmotionResult | undefined;
-  if (input.diagnostics ?? CONFIG.emotion.diagnosticMode) {
+  if (wantsDiagnostics) {
     try {
+      const localOnnxResult = await localOnnxPromise!;
       emotionDiagnostics = await runDiagnosticEmotion(input.transcript, input.acousticFeatures, {
         stm: sttHistory,
         ltmUser: ltmUserAll,
-      });
+      }, { textEmoResult, audioSignal: audioEmo, localOnnxResult });
       void logSessionEvent(makeEvent(evBase, "emotion_diagnostic", emotionDiagnostics as unknown as Record<string, unknown>));
     } catch (err) {
       console.warn("[Orchestrator] emotion diagnostic run failed:", err);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Radio, X, Phone, PhoneOff, Sparkles } from "lucide-react";
 import { getMicSupport, describeMicError } from "./micUtils";
 import { useVoiceActivityDetection } from "./useVoiceActivityDetection";
@@ -340,6 +340,14 @@ export function TestAgentDrawer() {
 
   const isLive = status !== "idle" && status !== "error";
 
+  // The right-hand analytics panel always reflects the *latest* turn rather
+  // than accumulating — that's what keeps it a fast, glanceable "what's
+  // happening right now" view instead of another scrolling list to chase.
+  const latestAssistantTurn = useMemo(
+    () => [...turns].reverse().find((t) => t.role === "assistant" && t.diagnostics),
+    [turns]
+  );
+
   return (
     <>
       <button
@@ -353,32 +361,36 @@ export function TestAgentDrawer() {
       </button>
 
       <div
-        className={`fixed inset-y-0 right-0 z-[105] w-full sm:w-[440px] voxera-console border-l border-[var(--console-border)] shadow-[-20px_0_60px_-15px_rgba(10,12,20,0.6)] transition-transform duration-300 ease-out flex flex-col ${
+        className={`fixed inset-y-0 right-0 z-[105] w-full sm:w-[820px] xl:w-[960px] max-w-full voxera-console border-l border-[var(--console-border)] shadow-[-20px_0_60px_-15px_rgba(10,12,20,0.6)] transition-transform duration-300 ease-out flex flex-col ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        {/* Pinned header — orb, call controls, running session strip. Never scrolls. */}
-        <div className="flex-none border-b border-[var(--console-border)] px-5 pt-6 pb-4 flex flex-col items-center gap-3">
-          <div ref={orbRef} className="voxera-orb">
-            <div className="voxera-orb-core">
-              <Sparkles className="w-4 h-4" />
+        {/* Pinned top bar — orb, status, call control. Compact and horizontal
+            so it never eats into the conversation/analytics split below. */}
+        <div className="flex-none border-b border-[var(--console-border)] px-5 py-3.5 flex items-center gap-4">
+          <div ref={orbRef} className="voxera-orb !w-14 !h-14 flex-none">
+            <div className="voxera-orb-core !w-8 !h-8">
+              <Sparkles className="w-3.5 h-3.5" />
             </div>
           </div>
 
-          <div className="text-[11px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">
-            {status === "idle" && "Ready"}
-            {status === "connecting" && "Connecting…"}
-            {status === "listening" && "Listening"}
-            {status === "thinking" && "Thinking…"}
-            {status === "speaking" && "Speaking"}
-            {status === "error" && "Error"}
+          <div className="min-w-0">
+            <div className="text-[12px] font-bold text-[var(--console-text)] leading-tight">Live Test Call</div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">
+              {status === "idle" && "Ready"}
+              {status === "connecting" && "Connecting…"}
+              {status === "listening" && "Listening"}
+              {status === "thinking" && "Thinking…"}
+              {status === "speaking" && "Speaking"}
+              {status === "error" && "Error"}
+            </div>
           </div>
 
           <button
             onClick={isLive ? endCall : startCall}
             disabled={!micSupported && !isLive}
             title={!micSupported ? "Microphone requires HTTPS (or localhost) and a supported browser" : undefined}
-            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-[13px] font-semibold transition-all ${
+            className={`ml-auto flex-none flex items-center gap-2 px-5 py-2 rounded-xl text-[13px] font-semibold transition-all ${
               isLive
                 ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:bg-red-600"
                 : "bg-[var(--console-violet)] text-[#0A0C14] hover:brightness-110"
@@ -387,63 +399,83 @@ export function TestAgentDrawer() {
             {isLive ? <PhoneOff className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
             {isLive ? "End Call" : "Start Call"}
           </button>
-
-          {emotionHistory.length > 0 && (
-            <div className="w-full">
-              <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
-              <EmotionTimeline history={emotionHistory} />
-            </div>
-          )}
         </div>
 
-        {/* Scrolling annotated transcript — diagnostics attach to the exact turn that produced them. */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-          {turns.length === 0 && !interim ? (
-            <div className="flex flex-col items-center justify-center text-center gap-2 py-10">
-              <Radio className="w-6 h-6 text-[var(--console-text-dim)]" />
-              <p className="text-[12.5px] text-[var(--console-text-dim)] max-w-[280px]">
-                Start a call and speak — talk over the agent any time to interrupt it, just like a
-                real conversation. Every turn's full engine breakdown appears below it.
-              </p>
-            </div>
-          ) : (
-            <>
-              {turns.map((t) => (
-                <div key={t.id} className="flex flex-col gap-2">
+        {/* Split body: conversation keeps flowing on the left at full speed;
+            analytics update independently on the right the instant new data
+            arrives, without pushing the transcript around or waiting on it. */}
+        <div className="flex-1 flex flex-col sm:flex-row min-h-0">
+          {/* LEFT — continuous conversation */}
+          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-[var(--console-border)]">
+            {turns.length === 0 && !interim ? (
+              <div className="flex flex-col items-center justify-center text-center gap-2 py-10 flex-1">
+                <Radio className="w-6 h-6 text-[var(--console-text-dim)]" />
+                <p className="text-[12.5px] text-[var(--console-text-dim)] max-w-[280px]">
+                  Start a call and speak — talk over the agent any time to interrupt it, just like a
+                  real conversation. Live analytics for every turn appear on the right.
+                </p>
+              </div>
+            ) : (
+              <>
+                {turns.map((t) => (
                   <div
-                    className={`max-w-[92%] rounded-2xl px-4 py-2.5 text-[13px] leading-snug ${
+                    key={t.id}
+                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-snug flex flex-col gap-1 ${
                       t.role === "user"
                         ? "self-end bg-[var(--console-violet)]/20 text-[var(--console-text)]"
                         : "self-start bg-[var(--console-surface-raised)] border border-[var(--console-border)] text-[var(--console-text)]"
                     }`}
                   >
                     {t.text}
+                    {t.role === "assistant" && t.emotion && (
+                      <span className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">
+                        responded to: {t.emotion}
+                      </span>
+                    )}
                   </div>
-                  {t.role === "assistant" && t.diagnostics && (
-                    <div className="self-start w-full pl-1">
-                      <EngineDiagnosticPanel diagnostics={t.diagnostics} />
-                      {t.cai && (
-                        <div className="mt-2 text-[10px] font-mono text-[var(--console-text-dim)]">
-                          CAI {t.cai.score}/100 · {t.cai.category}
-                        </div>
-                      )}
+                ))}
+                {interim && (
+                  <div className="self-end max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-snug italic text-[var(--console-text-dim)] bg-[var(--console-violet)]/[0.08] border border-dashed border-[var(--console-violet)]/30">
+                    {interim}
+                  </div>
+                )}
+              </>
+            )}
+
+            {error && (
+              <div className="rounded-xl bg-red-950/40 border border-red-900/60 text-[12.5px] text-red-300 px-4 py-3">
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT — live analytics, always reflecting the latest turn */}
+          <div className="sm:w-[360px] flex-none min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+            <div>
+              <div className="voxera-console-label text-[10px] font-bold mb-2">
+                Live Analytics {status === "thinking" && <span className="text-[var(--console-cyan)] normal-case">· updating…</span>}
+              </div>
+              {latestAssistantTurn?.diagnostics ? (
+                <>
+                  <EngineDiagnosticPanel diagnostics={latestAssistantTurn.diagnostics} />
+                  {latestAssistantTurn.cai && (
+                    <div className="mt-2 text-[10px] font-mono text-[var(--console-text-dim)]">
+                      CAI {latestAssistantTurn.cai.score}/100 · {latestAssistantTurn.cai.category}
                     </div>
                   )}
-                </div>
-              ))}
-              {interim && (
-                <div className="self-end max-w-[92%] rounded-2xl px-4 py-2.5 text-[13px] leading-snug italic text-[var(--console-text-dim)] bg-[var(--console-violet)]/[0.08] border border-dashed border-[var(--console-violet)]/30">
-                  {interim}
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[var(--console-border)] p-4 text-center text-[11.5px] text-[var(--console-text-dim)]">
+                  Engine breakdown for each reply appears here the instant it's ready.
                 </div>
               )}
-            </>
-          )}
-
-          {error && (
-            <div className="rounded-xl bg-red-950/40 border border-red-900/60 text-[12.5px] text-red-300 px-4 py-3">
-              {error}
             </div>
-          )}
+
+            <div>
+              <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
+              <EmotionTimeline history={emotionHistory} />
+            </div>
+          </div>
         </div>
       </div>
 
