@@ -82,6 +82,11 @@ wss.on("connection", async (ws: WebSocket, request) => {
 
     const turnPcm = Buffer.concat(turnAudioChunks);
     turnAudioChunks = [];
+    // Real STT time isn't cleanly measurable per-turn (Deepgram streams
+    // interim results continuously while the user is still talking) — the
+    // one honest number we have is how long the audio itself ran, which
+    // approximates it well enough for the pipeline visual's "Listen" stage.
+    const sttMs = Math.round((turnPcm.length / 2 / 16000) * 1000);
 
     try {
       console.log(`[STT] User: "${text}"`);
@@ -113,20 +118,31 @@ wss.on("connection", async (ws: WebSocket, request) => {
 
       console.log(`[LLM] Reply: "${output.reply}"`);
 
+      // Shared id lets the client correlate reply_text and reply_audio (sent
+      // separately, further below) back to the same turn — needed to merge
+      // ttsMs into the right turn's timings once synthesis finishes.
+      const replyTurnId = nanoid(8);
+      if (output.trace.timings) {
+        output.trace.timings.sttMs = sttMs;
+      }
+
       // Send the reply text (and emotion/engine trace for the dashboard)
       // immediately so the transcript feels instant, then synthesize audio.
       ws.send(
         JSON.stringify({
           type: "reply_text",
+          turnId: replyTurnId,
           text: output.reply,
           trace: output.trace,
         })
       );
 
+      const ttsStart = Date.now();
       const audio = await synthesize(output.reply, {
         policy: output.trace.policy,
         emotion: output.trace.emotion.current.label,
       });
+      const ttsMs = Date.now() - ttsStart;
 
       if (myGeneration !== generation) {
         console.log(`[Server] Dropping stale reply audio (generation ${myGeneration} != ${generation}).`);
@@ -136,6 +152,8 @@ wss.on("connection", async (ws: WebSocket, request) => {
       ws.send(
         JSON.stringify({
           type: "reply_audio",
+          turnId: replyTurnId,
+          ttsMs,
           audio: Buffer.from(audio).toString("base64"),
           mime: "audio/mpeg",
         })

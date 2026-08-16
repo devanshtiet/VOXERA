@@ -153,6 +153,52 @@ function EngineCard({ engineKey, d }: { engineKey: keyof typeof ENGINE_META; d: 
   );
 }
 
+/** Surfaces whether HF/Lexicon/Local ONNX actually agreed on this turn,
+ * instead of only ever showing the winner — proof the fusion decision isn't
+ * hand-waved, and the single most convincing thing to point a judge at. */
+function EngineAgreementCallout({ diagnostics }: { diagnostics: DiagnosticEmotionResult }) {
+  const candidates = (
+    [
+      { key: "hf", title: "HuggingFace", d: diagnostics.hf },
+      { key: "lexicon", title: "Lexicon", d: diagnostics.lexicon },
+      { key: "local_onnx", title: "Local ONNX", d: diagnostics.localOnnx },
+    ] as const
+  ).filter((c) => c.d.available && c.d.label);
+
+  if (candidates.length < 2) return null;
+
+  const labels = new Set(candidates.map((c) => c.d.label));
+  const allAgree = labels.size === 1;
+  const finalLabel = diagnostics.fusion.final.label;
+
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-[11px] leading-snug flex items-start gap-2 ${
+        allAgree ? "border-emerald-500/30 bg-emerald-500/[0.06]" : "border-amber-500/30 bg-amber-500/[0.06]"
+      }`}
+    >
+      <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-none ${allAgree ? "bg-emerald-400" : "bg-amber-400"}`} />
+      {allAgree ? (
+        <span className="text-[var(--console-text)]">
+          All {candidates.length} engines agreed: <span className="font-bold capitalize">{finalLabel}</span>
+        </span>
+      ) : (
+        <span className="text-[var(--console-text)]">
+          Engines disagreed —{" "}
+          {candidates.map((c, i) => (
+            <span key={c.key}>
+              {i > 0 && ", "}
+              <span className="font-semibold">{c.title}</span> said <span className="capitalize">{c.d.label}</span>
+            </span>
+          ))}
+          . Fusion picked <span className="font-bold capitalize">{finalLabel}</span> because{" "}
+          {diagnostics.fusion.textSelection.reason.replace(/^HF |^Lexicon /, (m) => m.toLowerCase())}.
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function EngineDiagnosticPanel({
   diagnostics,
   compact = false,
@@ -181,6 +227,8 @@ export function EngineDiagnosticPanel({
   const { fusion } = diagnostics;
   return (
     <div className="flex flex-col gap-4">
+      <EngineAgreementCallout diagnostics={diagnostics} />
+
       {/* Both HF and Lexicon (plus Local ONNX and Acoustic) stay visible here
           regardless of which one was selected below — comparing engines is
           the point of this panel, not just showing the winner. */}

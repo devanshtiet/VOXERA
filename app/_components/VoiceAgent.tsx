@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Send, Square, Activity, Loader2, Repeat, Gauge } from "lucide-react";
+import { Mic, Send, Square, Activity, Loader2, Repeat, Gauge, PlayCircle, StopCircle } from "lucide-react";
 import {
   PipelineTracker,
   EngineDiagnosticPanel,
@@ -68,6 +68,60 @@ const EXAMPLE_INPUTS = [
 
 const MAX_SILENT_RETRIES = 3;
 
+/** One-click scripted conversations — lets a judge watch the emotion engine
+ * adapt turn-by-turn without having to improvise good test inputs
+ * themselves. Each line is sent as its own turn, paced with a delay so the
+ * reply is readable before the next one fires. */
+interface Scenario {
+  key: string;
+  label: string;
+  description: string;
+  turns: string[];
+}
+
+const SCENARIOS: Scenario[] = [
+  {
+    key: "angry-escalation",
+    label: "Angry escalation",
+    description: "Repeated frustration ramping into anger — watch policy trigger a hand-off.",
+    turns: [
+      "This is the third time I've called about this exact same issue.",
+      "I'm honestly furious right now, nobody has fixed this yet.",
+      "This is completely unacceptable. I want this escalated immediately.",
+    ],
+  },
+  {
+    key: "genuine-distress",
+    label: "Genuine distress",
+    description: "A caller in real distress — watch the persona slow down and prioritize safety.",
+    turns: [
+      "I don't really know what to do right now, I'm kind of panicking.",
+      "This is an emergency, I'm really scared and can't think straight.",
+      "Can you please just help me, I don't know who else to call.",
+    ],
+  },
+  {
+    key: "happy-upsell",
+    label: "Happy news",
+    description: "Positive, high-energy news — watch tone match energy without overdoing it.",
+    turns: [
+      "I just got some amazing news, I got the promotion!",
+      "I'm so excited, I honestly wasn't expecting it at all.",
+      "What else can you help me with today?",
+    ],
+  },
+  {
+    key: "confused-rambling",
+    label: "Confused & rambling",
+    description: "Unclear, meandering input — watch replies stay short and ask one thing at a time.",
+    turns: [
+      "Wait, sorry, what were we even talking about again?",
+      "I don't really understand what's happening here, can you explain?",
+      "Actually never mind, I'm not sure what I'm asking honestly.",
+    ],
+  },
+];
+
 export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceAgentProps = {}) {
   const [transcript, setTranscript] = useState("");
   const [history, setHistory] = useState<TurnEntry[]>([]);
@@ -80,6 +134,9 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
   const [diagnostics, setDiagnostics] = useState<DiagnosticEmotionResult | null>(null);
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
   const [continuousMode, setContinuousMode] = useState(false);
+  const [runningScenario, setRunningScenario] = useState<string | null>(null);
+  const [scenarioStep, setScenarioStep] = useState(0);
+  const scenarioAbortRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -165,6 +222,30 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
     },
     [busy, sessionId, clientId, userId],
   );
+
+  const runScenario = useCallback(
+    async (scenario: Scenario) => {
+      if (busy || runningScenario) return;
+      setRunningScenario(scenario.key);
+      scenarioAbortRef.current = false;
+      for (let i = 0; i < scenario.turns.length; i++) {
+        if (scenarioAbortRef.current) break;
+        setScenarioStep(i);
+        await submitTurn(scenario.turns[i]);
+        if (scenarioAbortRef.current) break;
+        // Paced so the reply is actually readable/audible before the next
+        // line fires — this is meant to be watched, not raced through.
+        await new Promise((r) => setTimeout(r, 3500));
+      }
+      setRunningScenario(null);
+    },
+    [busy, runningScenario, submitTurn],
+  );
+
+  const stopScenario = useCallback(() => {
+    scenarioAbortRef.current = true;
+    setRunningScenario(null);
+  }, []);
 
   const startRecording = useCallback(async () => {
     setError(null);
@@ -350,18 +431,52 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
           console instead of a dark panel stacked on a mismatched light card. */}
       <div className="voxera-console flex flex-col rounded-2xl shadow-[0_20px_60px_-15px_rgba(10,12,20,0.5)] overflow-hidden">
         {showExamples && (
-          <div className="flex flex-wrap gap-1.5 px-5 pt-4">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] py-1">Try:</span>
-            {EXAMPLE_INPUTS.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => setTranscript(example)}
-                className="text-[11.5px] px-2.5 py-1 rounded-full bg-[var(--console-surface)] border border-[var(--console-border)] text-[var(--console-text-dim)] hover:border-[var(--console-border-active)] hover:text-[var(--console-text)] transition-colors"
-              >
-                {example}
-              </button>
-            ))}
+          <div className="flex flex-col gap-2.5 px-5 pt-4">
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] py-1">
+                Scenarios:
+              </span>
+              {SCENARIOS.map((s) => {
+                const isRunning = runningScenario === s.key;
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    title={s.description}
+                    onClick={() => (isRunning ? stopScenario() : runScenario(s))}
+                    disabled={!isRunning && (busy || !!runningScenario)}
+                    className={`flex items-center gap-1.5 text-[11.5px] px-2.5 py-1 rounded-full border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      isRunning
+                        ? "bg-[var(--console-violet)]/20 border-[var(--console-violet)]/50 text-[var(--console-violet)]"
+                        : "bg-[var(--console-surface)] border-[var(--console-border)] text-[var(--console-text-dim)] hover:border-[var(--console-border-active)] hover:text-[var(--console-text)]"
+                    }`}
+                  >
+                    {isRunning ? (
+                      <>
+                        <StopCircle className="w-3.5 h-3.5" /> Stop ({scenarioStep + 1}/{s.turns.length})
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="w-3.5 h-3.5" /> {s.label}
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] py-1">Try:</span>
+              {EXAMPLE_INPUTS.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => setTranscript(example)}
+                  className="text-[11.5px] px-2.5 py-1 rounded-full bg-[var(--console-surface)] border border-[var(--console-border)] text-[var(--console-text-dim)] hover:border-[var(--console-border-active)] hover:text-[var(--console-text)] transition-colors"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         <textarea
