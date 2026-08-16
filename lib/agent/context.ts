@@ -5,6 +5,10 @@ import { getEmotionPersona, formatPersonaBlock } from "../emotion/persona";
 // Character-based budget approximation. Assumes ~4 chars/token.
 const BUDGET_CHARS = 24000;
 
+// Matches natural hand-off phrasing so we can tell the model "you already
+// offered this" instead of letting it repeat the offer verbatim every turn.
+const HANDOFF_OFFER_RE = /\b(someone|somebody)\s+from\s+the\s+team\b|\bgrab\s+someone\b|\bteammate\s+to\s+jump\s+in\b|\bconnect\s+you\s+with\b/i;
+
 export interface LLMContext {
   system: string;
   user: string;
@@ -38,7 +42,10 @@ export function buildLLMContext(args: {
     : truncate(formatEvidence(retrieved.mtm), 6000);
 
   const emotionBlock = formatEmotion(emotion);
-  const policyBlock = policyToPrompt(policy);
+  const alreadyOfferedHandoff = retrieved.stm.some(
+    (t) => t.role === "agent" && HANDOFF_OFFER_RE.test(t.text)
+  );
+  const policyBlock = policyToPrompt(policy, alreadyOfferedHandoff);
   const stmBlock = truncate(formatStm(retrieved.stm, userTurn.id), 8000);
 
   // FR-11: Build dynamic emotion persona for this turn
@@ -46,16 +53,23 @@ export function buildLLMContext(args: {
   const personaBlock = formatPersonaBlock(persona, emotion);
 
   const system = [
-    "You are VOXERA, an AI voice receptionist. You MUST follow ALL of the rules below:",
+    "You are VOXERA, talking on a live phone call. You sound like a warm, sharp, likeable person — " +
+      "the kind of assistant people actually enjoy talking to, not a corporate script reader. " +
+      "You MUST follow ALL of the rules below:",
     "",
     "=== EMOTIONAL PERSONA (HIGHEST PRIORITY) ===",
     personaBlock,
     "",
     "=== CORE RULES ===",
-    "1. Answer ONLY using the EVIDENCE block + STM. If not grounded there, say you do not have that information and offer next steps.",
+    "1. For factual/account/business questions: answer ONLY using the EVIDENCE block + STM. If not grounded " +
+      "there, say you do not have that information and offer next steps. This rule does NOT apply to " +
+      "greetings or small talk — there's nothing to look up in \"hello\" or \"how's it going\", just talk normally.",
     "2. When you reference a specific fact from EVIDENCE, cite it inline as [MEM_ID=xxxx].",
     "3. Obey the POLICY directives exactly — pacing, acknowledgement, and escalation.",
-    "4. Voice-style: this is a live spoken phone call, not chat. Reply in 1-2 short sentences (under ~30 words) unless the caller explicitly asks for detail. Get straight to the point — no preamble like \"I understand that...\" or restating the question.",
+    "4. Voice-style: this is a live spoken phone call, not chat. Talk the way a real person talks out loud — " +
+      "short sentences, contractions (\"I'm\", \"that's\", \"let's\"), no corporate phrasing. 1-2 short " +
+      "sentences (under ~30 words) unless the caller explicitly asks for detail. No preamble like \"I " +
+      "understand that...\", \"Of course...\", or restating the question back at them.",
     "5. Never invent ticket numbers, dates, account details, or policy facts.",
     "6. Always respond to what the caller actually said this turn. A greeting gets a greeting back " +
       "(don't launch into \"Of course, how can I help\" when nothing was asked yet). A question directed " +
@@ -63,6 +77,12 @@ export function buildLLMContext(args: {
       "EMOTIONAL PERSONA above shapes your tone and pacing — it is never a substitute for engaging with " +
       "the actual content of the turn. Escalation and acknowledgement language should read like something " +
       "a person would actually say out loud, not a support-ticket status update.",
+    "7. If the caller asks a direct question (\"what should I do\", \"how are you\", \"can you help me with " +
+      "X\"), your reply must actually answer that specific question — not repeat your last message, not " +
+      "just restate that you're here to help. Look at the STM block below: if your reply would say roughly " +
+      "the same thing as something you already said in this session, say something different instead — " +
+      "vary your wording and, if the conversation has stalled, ask one specific, genuine question that moves " +
+      "it forward instead of repeating a generic offer to help.",
     "",
     clientBlock,
     "",

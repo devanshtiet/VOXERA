@@ -153,10 +153,24 @@ function EngineCard({ engineKey, d }: { engineKey: keyof typeof ENGINE_META; d: 
   );
 }
 
-export function EngineDiagnosticPanel({ diagnostics }: { diagnostics: DiagnosticEmotionResult | null }) {
+export function EngineDiagnosticPanel({
+  diagnostics,
+  compact = false,
+}: {
+  diagnostics: DiagnosticEmotionResult | null;
+  /**
+   * Force a 2-column grid regardless of viewport width. `md:grid-cols-4`
+   * is a viewport-width breakpoint, not a container-width one — inside a
+   * narrow sidebar (e.g. the ~360px live-analytics column in
+   * TestAgentDrawer.tsx) on a wide desktop viewport it still forced 4
+   * columns into that narrow space, badly overlapping the card contents.
+   */
+  compact?: boolean;
+}) {
+  const gridCols = compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4";
   if (!diagnostics) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+      <div className={`grid ${gridCols} gap-2.5`}>
         <EngineCard engineKey="hf" d={null} />
         <EngineCard engineKey="lexicon" d={null} />
         <EngineCard engineKey="local_onnx" d={null} />
@@ -170,7 +184,7 @@ export function EngineDiagnosticPanel({ diagnostics }: { diagnostics: Diagnostic
       {/* Both HF and Lexicon (plus Local ONNX and Acoustic) stay visible here
           regardless of which one was selected below — comparing engines is
           the point of this panel, not just showing the winner. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+      <div className={`grid ${gridCols} gap-2.5`}>
         <EngineCard engineKey="hf" d={diagnostics.hf} />
         <EngineCard engineKey="lexicon" d={diagnostics.lexicon} />
         <EngineCard engineKey="local_onnx" d={diagnostics.localOnnx} />

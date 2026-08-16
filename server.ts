@@ -37,8 +37,14 @@ function downsample16kTo8k(pcm: Buffer): Buffer {
   return out;
 }
 
-wss.on("connection", async (ws: WebSocket) => {
-  console.log("\n[Server] New client connected.");
+wss.on("connection", async (ws: WebSocket, request) => {
+  // Optional ?clientId=<tenant auth_user_id> lets the live test drawer test
+  // against a specific tenant's actual knowledge base + brand-voice memory
+  // instead of always the hardcoded demo tenant — see /api/tenants and
+  // TestAgentDrawer.tsx's agent selector.
+  const requestUrl = new URL(request.url ?? "/", "http://localhost");
+  const clientId = requestUrl.searchParams.get("clientId") || DEMO.clientId;
+  console.log(`\n[Server] New client connected. clientId=${clientId}`);
 
   const sessionId = `browser-${nanoid(12)}`;
   let isBusy = false; // prevent overlapping turns while a reply is being generated
@@ -88,7 +94,7 @@ wss.on("connection", async (ws: WebSocket) => {
       const output = await handleTurn({
         sessionId,
         userId: DEMO.userId,
-        clientId: DEMO.clientId,
+        clientId,
         transcript: text,
         sttConfidence: 0.9,
         acousticFeatures,
@@ -220,7 +226,7 @@ wss.on("connection", async (ws: WebSocket) => {
   try {
     await ensureSeeded();
     await dgConnectPromise;
-    ws.send(JSON.stringify({ type: "system", message: "Connected to Deepgram STT engine" }));
+    ws.send(JSON.stringify({ type: "system", message: "Connected to Deepgram STT engine", clientId }));
   } catch (err) {
     console.error("[Server] Failed to connect to Deepgram:", err);
     ws.send(JSON.stringify({ type: "error", message: "Failed to initialize STT" }));

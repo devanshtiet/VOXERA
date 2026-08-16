@@ -72,14 +72,20 @@ export function decidePolicy(emotion: EmotionContext): PolicyDirectives {
 }
 
 
-export function policyToPrompt(d: PolicyDirectives): string {
+export function policyToPrompt(d: PolicyDirectives, alreadyOfferedHandoff = false): string {
   const parts = [
     `Pace: ${d.pace}.`,
     d.acknowledgeFirst ? "Open with a genuine acknowledgement of the user's feeling BEFORE any procedural content." : "",
     d.allowUpsell ? "" : "Do NOT upsell or suggest paid add-ons.",
     d.escalate !== "none"
-      ? `Escalation required: connect the caller to ${d.escalate === "human" ? "a human agent" : "a specialist"}. ` +
-        `Say this naturally, the way a person would say it out loud — never say the literal word "${d.escalate}".`
+      ? alreadyOfferedHandoff
+        ? "Escalation is still active, but you already offered to bring someone in earlier this session (see " +
+          "STM) — do NOT repeat that offer again. Just keep talking with the caller normally and stay on what " +
+          "they're actually saying. Only mention the hand-off again if the caller asks about it or explicitly agrees."
+        : "Escalation required: offer to bring in a real person from the team to take over, ONCE. Say it exactly " +
+          "the way a friend would offer to grab someone — e.g. \"Let me grab someone from the team for you\" or " +
+          "\"I'll get a teammate to jump in and help with this.\" NEVER say the words \"tier\", \"tier 2\", " +
+          "\"tier2\", \"specialist\", or \"escalate\" — those are internal terms, not something you'd say out loud."
       : "",
     d.safetyScript ? `Safety: ${d.safetyScript}` : "",
     ...d.notes.map((n) => `Note: ${n}`),

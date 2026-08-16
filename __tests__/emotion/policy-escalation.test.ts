@@ -188,3 +188,19 @@ describe("policyToPrompt — output format", () => {
     expect(prompt).not.toContain("Escalation required");
   });
 });
+
+describe("policyToPrompt — does not repeat the hand-off offer every turn", () => {
+  it("tells the model to offer a hand-off when it hasn't been offered yet", () => {
+    const policy = decidePolicy(makeCtx("distress", 0.9));
+    const prompt = policyToPrompt(policy, false);
+    expect(prompt).toContain("Escalation required");
+    expect(prompt).not.toContain("do NOT repeat");
+  });
+
+  it("tells the model NOT to repeat the offer once it's already been made", () => {
+    const policy = decidePolicy(makeCtx("distress", 0.9));
+    const prompt = policyToPrompt(policy, true);
+    expect(prompt).not.toContain("Escalation required:");
+    expect(prompt.toLowerCase()).toContain("do not repeat");
+  });
+});
