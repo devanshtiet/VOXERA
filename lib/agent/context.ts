@@ -22,8 +22,13 @@ export function buildLLMContext(args: {
   retrieved: RetrievedContext;
   emotion: EmotionContext;
   policy: PolicyDirectives;
+  /** A custom agent's own system prompt (Agent Builder, lib/db/agents.ts's
+   * `system_prompt` column) — domain-specific instructions layered on top
+   * of the baseline rules, never a replacement for them. Undefined for the
+   * hardcoded demo agent. */
+  customInstructions?: string;
 }): LLMContext {
-  const { retrieved, emotion, policy, userTurn } = args;
+  const { retrieved, emotion, policy, userTurn, customInstructions } = args;
 
   const clientBlock = truncate(
     formatRecords("CLIENT", retrieved.ltmClient, ["brand_voice", "compliance", "escalation"]),
@@ -83,6 +88,13 @@ export function buildLLMContext(args: {
       "the same thing as something you already said in this session, say something different instead — " +
       "vary your wording and, if the conversation has stalled, ask one specific, genuine question that moves " +
       "it forward instead of repeating a generic offer to help.",
+    "",
+    customInstructions?.trim()
+      ? "=== AGENT-SPECIFIC INSTRUCTIONS (from this agent's creator) ===\n" +
+        truncate(customInstructions.trim(), 2000) +
+        "\nFollow these in addition to everything above — they add detail and personality for this specific " +
+        "agent, they never override the CORE RULES, the EMOTIONAL PERSONA, or safety/escalation behavior."
+      : "",
     "",
     clientBlock,
     "",

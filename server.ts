@@ -38,13 +38,17 @@ function downsample16kTo8k(pcm: Buffer): Buffer {
 }
 
 wss.on("connection", async (ws: WebSocket, request) => {
-  // Optional ?clientId=<tenant auth_user_id> lets the live test drawer test
-  // against a specific tenant's actual knowledge base + brand-voice memory
-  // instead of always the hardcoded demo tenant — see /api/tenants and
-  // TestAgentDrawer.tsx's agent selector.
+  // Optional ?agentId=<Agent Builder agent id> lets the live test drawer
+  // test against a specific custom agent — its own system prompt and its
+  // owning tenant's knowledge base — instead of always the hardcoded demo
+  // agent. Resolved inside handleTurn (lib/agent/orchestrator.ts), which
+  // also overrides clientId from the agent's tenant when agentId is valid.
+  // ?clientId=<tenant auth_user_id> is kept for direct tenant testing
+  // without a specific agent (legacy /api/tenants selector, still valid).
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
+  const agentId = requestUrl.searchParams.get("agentId") || undefined;
   const clientId = requestUrl.searchParams.get("clientId") || DEMO.clientId;
-  console.log(`\n[Server] New client connected. clientId=${clientId}`);
+  console.log(`\n[Server] New client connected. clientId=${clientId} agentId=${agentId ?? "(none)"}`);
 
   const sessionId = `browser-${nanoid(12)}`;
   let isBusy = false; // prevent overlapping turns while a reply is being generated
@@ -100,6 +104,7 @@ wss.on("connection", async (ws: WebSocket, request) => {
         sessionId,
         userId: DEMO.userId,
         clientId,
+        agentId,
         transcript: text,
         sttConfidence: 0.9,
         acousticFeatures,

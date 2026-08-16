@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "../../lib/db/server";
 import Link from "next/link";
-import { LayoutDashboard, MessageSquare, Database, Settings, LogOut, Sparkles, Users, PhoneCall } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Database, Settings, LogOut, Sparkles, Users, PhoneCall, Bot } from "lucide-react";
 import { AdminMobileNav } from "../../components/admin/AdminMobileNav";
 
 export default async function AdminLayout({
@@ -31,6 +31,7 @@ export default async function AdminLayout({
           
           <nav className="flex-1 px-4 space-y-2">
             <NavItem href="/admin" icon={LayoutDashboard} label="Dashboard" />
+            <NavItem href="/admin/agents" icon={Bot} label="Agent Builder" />
             <NavItem href="/admin/try-call" icon={PhoneCall} label="Try a Call" />
             <NavItem href="/admin/tenants" icon={Users} label="Tenants" />
             <NavItem href="/admin/sessions" icon={MessageSquare} label="Sessions" />

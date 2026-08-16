@@ -9,6 +9,8 @@ import { runDiagnosticEmotion, type DiagnosticEmotionResult } from "../emotion/e
 import { detectTextEmotionLocalONNX } from "../emotion/local-onnx-detect";
 import { logSessionEvent, makeEvent } from "../logging/session-logger";
 import { emitSessionEvent } from "../realtime/emitter";
+import { supabase as supabaseService } from "../db/supabase";
+import { getAgentWithTenant } from "../db/agents";
 import { retrieve, topScore } from "../memory/retrieval";
 import { stm } from "../memory/stm";
 import { vectorStore } from "../memory/store";
@@ -34,6 +36,11 @@ export interface TurnInput {
   bargeInCount?: number;
   /** Per-call override for CONFIG.emotion.diagnosticMode — lets callers (e.g. the demo UI) opt into the full engine breakdown without changing the global production default. */
   diagnostics?: boolean;
+  /** Agent Builder (lib/db/agents.ts) agent id. When present, its owning
+   * tenant's clientId overrides the plain `clientId` field above (so
+   * retrieval/knowledge scoping follows the agent, not a separately-passed
+   * value), and its system_prompt is layered into the LLM system prompt. */
+  agentId?: string;
 }
 
 /** Lightweight, judge-readable view of a MemoryRecord — enough to show WHY a
@@ -75,6 +82,10 @@ export interface TurnTrace {
   acousticFeatures?: AcousticFeatures;
   /** Present only when CONFIG.emotion.diagnosticMode is on — full HF/Lexicon/Local ONNX/Acoustic comparison. */
   emotionDiagnostics?: DiagnosticEmotionResult;
+  /** Present when this turn was routed through a custom Agent Builder agent
+   * (TurnInput.agentId resolved successfully) — lets the UI show which
+   * agent actually generated the reply. */
+  agent?: { id: string; name: string };
   /** Wall-clock ms spent in each server-side stage of this turn — real
    * measurements, not estimates, wired into the Live Engine Console's
    * pipeline visual. sttMs/ttsMs are filled in by server.ts for realtime
@@ -98,6 +109,28 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   const turnStart = Date.now();
   const ts = turnStart;
   const sttConf = input.sttConfidence ?? 1;
+
+  // Resolve a custom Agent Builder agent before anything else keys off
+  // clientId — the agent's owning tenant becomes the effective clientId for
+  // knowledge/memory scoping, and its system_prompt flows into the LLM
+  // context below. Falls back silently to the plain clientId/DEMO agent on
+  // any lookup failure (unknown id, Supabase unreachable) rather than
+  // failing the turn.
+  let customInstructions: string | undefined;
+  let resolvedAgent: { id: string; name: string } | undefined;
+  if (input.agentId) {
+    try {
+      const agentInfo = await getAgentWithTenant(supabaseService, input.agentId);
+      if (agentInfo) {
+        input.clientId = agentInfo.tenant_auth_user_id;
+        customInstructions = agentInfo.system_prompt ?? undefined;
+        resolvedAgent = { id: agentInfo.id, name: agentInfo.name };
+      }
+    } catch (err) {
+      console.warn("[Orchestrator] Failed to resolve agentId, using default clientId:", err);
+    }
+  }
+
   const evBase = { sessionId: input.sessionId, userId: input.userId, clientId: input.clientId };
 
   // ── Issue #14: Pre-LLM Input Guard ─────────────────────────────────────
@@ -346,6 +379,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     retrieved,
     emotion: emotionCtx,
     policy,
+    customInstructions,
   });
 
   const llmStart = Date.now();
@@ -423,6 +457,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
       },
       acousticFeatures: input.acousticFeatures,
       emotionDiagnostics,
+      agent: resolvedAgent,
     },
   };
 }

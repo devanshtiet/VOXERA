@@ -19,10 +19,10 @@ const WS_BASE_URL = process.env.NEXT_PUBLIC_REALTIME_WS_URL || "ws://localhost:3
 
 type CallStatus = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 
-interface Tenant {
+interface Agent {
   id: string;
   name: string;
-  authUserId: string;
+  description: string | null;
 }
 
 interface TurnPolicy {
@@ -267,9 +267,9 @@ export function TestAgentDrawer() {
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [interim, setInterim] = useState("");
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<string>(""); // "" = demo agent
-  const [activeTenantName, setActiveTenantName] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(""); // "" = demo agent
+  const [activeAgentName, setActiveAgentName] = useState<string | null>(null);
   const [showReasoning, setShowReasoning] = useState(true);
   // Which turn the analytics column is showing. Auto-advances to each new
   // reply as it arrives (the original "always show what just happened"
@@ -303,18 +303,30 @@ export function TestAgentDrawer() {
     setMicSupported(getMicSupport());
   }, []);
 
-  // Fetch the list of real configured agents (tenants) once the drawer is
-  // first opened, so "test my own agent" doesn't require reloading the page.
+  // Fetch the list of real Agent Builder agents once the drawer is first
+  // opened, so "test my own agent" doesn't require reloading the page.
   // Fails silently to an empty list (falls back to the demo agent) — most
   // commonly because Supabase isn't reachable in this environment, which
-  // /api/tenants already degrades gracefully for.
+  // /api/agents already degrades gracefully for.
   useEffect(() => {
-    if (!open || tenants.length > 0) return;
-    fetch("/api/tenants")
+    if (!open || agents.length > 0) return;
+    fetch("/api/agents")
       .then((r) => r.json())
-      .then((data: { tenants: Tenant[] }) => setTenants(data.tenants ?? []))
+      .then((data: { agents: Agent[] }) => setAgents(data.agents ?? []))
       .catch(() => {});
-  }, [open, tenants.length]);
+  }, [open, agents.length]);
+
+  // Deep-link support: /demo?agentId=<id> (used by the "Test this agent"
+  // button in /admin/agents) pre-selects that agent and opens the drawer
+  // automatically, once its info has loaded.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const agentId = params.get("agentId");
+    if (agentId) {
+      setSelectedAgentId(agentId);
+      setOpen(true);
+    }
+  }, []);
 
   // Lets other pages (e.g. the /demo mode switcher's "Live Call" CTA) open
   // this single site-wide drawer instance without prop-drilling or context.
@@ -422,11 +434,12 @@ export function TestAgentDrawer() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const selectedTenant = tenants.find((t) => t.id === selectedTenantId);
-      const wsUrl = selectedTenant
-        ? `${WS_BASE_URL}?clientId=${encodeURIComponent(selectedTenant.authUserId)}`
+      const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+      const effectiveAgentId = selectedAgent?.id ?? (selectedAgentId || undefined);
+      const wsUrl = effectiveAgentId
+        ? `${WS_BASE_URL}?agentId=${encodeURIComponent(effectiveAgentId)}`
         : WS_BASE_URL;
-      setActiveTenantName(selectedTenant?.name ?? null);
+      setActiveAgentName(selectedAgent?.name ?? null);
 
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
@@ -590,7 +603,7 @@ export function TestAgentDrawer() {
       setStatus("error");
       endCall();
     }
-  }, [endCall, startLevelLoop, vad, bargeIn, tenants, selectedTenantId]);
+  }, [endCall, startLevelLoop, vad, bargeIn, agents, selectedAgentId]);
 
   const isLive = status !== "idle" && status !== "error";
 
@@ -661,32 +674,32 @@ export function TestAgentDrawer() {
           </button>
         </div>
 
-        {/* Agent selector — pick which configured tenant's actual prompt,
-            knowledge base, and brand-voice memory to test against, instead
-            of always the hardcoded demo agent. Locked once a call starts. */}
+        {/* Agent selector — pick which custom Agent Builder agent's actual
+            prompt, persona, and knowledge base to test against, instead of
+            always the hardcoded demo agent. Locked once a call starts. */}
         <div className="flex-none border-b border-[var(--console-border)] px-5 py-2 flex items-center gap-2 text-[11px]">
           <span className="font-mono uppercase tracking-widest text-[var(--console-text-dim)] flex-none">Testing:</span>
           {isLive ? (
-            <span className="font-semibold text-[var(--console-text)]">{activeTenantName ?? "Demo agent"}</span>
+            <span className="font-semibold text-[var(--console-text)]">{activeAgentName ?? "Demo agent"}</span>
           ) : (
             <div className="relative flex-1 min-w-0 max-w-[280px]">
               <select
-                value={selectedTenantId}
-                onChange={(e) => setSelectedTenantId(e.target.value)}
+                value={selectedAgentId}
+                onChange={(e) => setSelectedAgentId(e.target.value)}
                 className="w-full appearance-none bg-[var(--console-surface-raised)] border border-[var(--console-border)] rounded-lg px-2.5 py-1 pr-6 text-[11px] font-semibold text-[var(--console-text)] focus:outline-none focus:border-[var(--console-border-active)]"
               >
                 <option value="">Demo agent</option>
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id} className="bg-[var(--console-surface)] text-[var(--console-text)]">
-                    {t.name}
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id} className="bg-[var(--console-surface)] text-[var(--console-text)]">
+                    {a.name}
                   </option>
                 ))}
               </select>
               <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--console-text-dim)]" />
             </div>
           )}
-          {tenants.length === 0 && (
-            <span className="text-[var(--console-text-dim)]">(no configured agents found — testing the demo agent)</span>
+          {agents.length === 0 && (
+            <span className="text-[var(--console-text-dim)]">(no custom agents found — testing the demo agent)</span>
           )}
         </div>
 
