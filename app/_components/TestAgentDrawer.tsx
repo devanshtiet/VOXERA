@@ -401,18 +401,46 @@ export function TestAgentDrawer() {
           </button>
         </div>
 
-        {/* Split body: conversation keeps flowing on the left at full speed;
-            analytics update independently on the right the instant new data
-            arrives, without pushing the transcript around or waiting on it. */}
+        {/* Split body: analytics update on the left the instant new data
+            arrives, conversation keeps flowing independently on the right —
+            neither one waits on or pushes around the other. */}
         <div className="flex-1 flex flex-col sm:flex-row min-h-0">
-          {/* LEFT — continuous conversation */}
-          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-[var(--console-border)]">
+          {/* LEFT — live analytics, always reflecting the latest turn */}
+          <div className="sm:w-[360px] flex-none min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4 border-b sm:border-b-0 sm:border-r border-[var(--console-border)]">
+            <div>
+              <div className="voxera-console-label text-[10px] font-bold mb-2">
+                Live Analytics {status === "thinking" && <span className="text-[var(--console-cyan)] normal-case">· updating…</span>}
+              </div>
+              {latestAssistantTurn?.diagnostics ? (
+                <>
+                  <EngineDiagnosticPanel diagnostics={latestAssistantTurn.diagnostics} />
+                  {latestAssistantTurn.cai && (
+                    <div className="mt-2 text-[10px] font-mono text-[var(--console-text-dim)]">
+                      CAI {latestAssistantTurn.cai.score}/100 · {latestAssistantTurn.cai.category}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[var(--console-border)] p-4 text-center text-[11.5px] text-[var(--console-text-dim)]">
+                  Engine breakdown for each reply appears here the instant it's ready.
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
+              <EmotionTimeline history={emotionHistory} />
+            </div>
+          </div>
+
+          {/* RIGHT — continuous conversation */}
+          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-3">
             {turns.length === 0 && !interim ? (
               <div className="flex flex-col items-center justify-center text-center gap-2 py-10 flex-1">
                 <Radio className="w-6 h-6 text-[var(--console-text-dim)]" />
                 <p className="text-[12.5px] text-[var(--console-text-dim)] max-w-[280px]">
                   Start a call and speak — talk over the agent any time to interrupt it, just like a
-                  real conversation. Live analytics for every turn appear on the right.
+                  real conversation. Live analytics for every turn appear on the left.
                 </p>
               </div>
             ) : (
@@ -447,34 +475,6 @@ export function TestAgentDrawer() {
                 {error}
               </div>
             )}
-          </div>
-
-          {/* RIGHT — live analytics, always reflecting the latest turn */}
-          <div className="sm:w-[360px] flex-none min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-            <div>
-              <div className="voxera-console-label text-[10px] font-bold mb-2">
-                Live Analytics {status === "thinking" && <span className="text-[var(--console-cyan)] normal-case">· updating…</span>}
-              </div>
-              {latestAssistantTurn?.diagnostics ? (
-                <>
-                  <EngineDiagnosticPanel diagnostics={latestAssistantTurn.diagnostics} />
-                  {latestAssistantTurn.cai && (
-                    <div className="mt-2 text-[10px] font-mono text-[var(--console-text-dim)]">
-                      CAI {latestAssistantTurn.cai.score}/100 · {latestAssistantTurn.cai.category}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="rounded-xl border border-dashed border-[var(--console-border)] p-4 text-center text-[11.5px] text-[var(--console-text-dim)]">
-                  Engine breakdown for each reply appears here the instant it's ready.
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
-              <EmotionTimeline history={emotionHistory} />
-            </div>
           </div>
         </div>
       </div>

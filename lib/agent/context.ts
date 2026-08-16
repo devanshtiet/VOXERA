@@ -57,6 +57,12 @@ export function buildLLMContext(args: {
     "3. Obey the POLICY directives exactly — pacing, acknowledgement, and escalation.",
     "4. Voice-style: this is a live spoken phone call, not chat. Reply in 1-2 short sentences (under ~30 words) unless the caller explicitly asks for detail. Get straight to the point — no preamble like \"I understand that...\" or restating the question.",
     "5. Never invent ticket numbers, dates, account details, or policy facts.",
+    "6. Always respond to what the caller actually said this turn. A greeting gets a greeting back " +
+      "(don't launch into \"Of course, how can I help\" when nothing was asked yet). A question directed " +
+      "at you gets answered as asked, not deflected into a generic remark about the caller's mood. The " +
+      "EMOTIONAL PERSONA above shapes your tone and pacing — it is never a substitute for engaging with " +
+      "the actual content of the turn. Escalation and acknowledgement language should read like something " +
+      "a person would actually say out loud, not a support-ticket status update.",
     "",
     clientBlock,
     "",

@@ -307,6 +307,10 @@ export function formatPersonaBlock(
   }
 
   lines.push(`EXAMPLE OPENING: "${persona.example}"`);
+  lines.push(
+    `(That example is a tone/register reference ONLY — it was written without knowing what the caller ` +
+    `actually said this turn. Never reuse its wording or copy its structure; write an original reply.)`
+  );
 
   // Add trajectory context for the LLM
   const slopeDesc =
