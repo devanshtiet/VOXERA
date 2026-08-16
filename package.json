@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "server": "tsx server.ts",
+    "server": "tsx --env-file=.env.local server.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "test:e2e": "vitest run __tests__/e2e"
