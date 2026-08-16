@@ -12,6 +12,9 @@ import {
 } from "./EngineDashboard";
 
 const TARGET_SAMPLE_RATE = 16000;
+// ~100ms per WS frame at 16kHz — batches the AudioWorklet's 128-sample
+// (2.7ms) render quanta into chunks actually useful for streaming STT.
+const SEND_CHUNK_SAMPLES = 1600;
 const WS_URL = process.env.NEXT_PUBLIC_REALTIME_WS_URL || "ws://localhost:3001";
 
 type CallStatus = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
@@ -72,6 +75,12 @@ export function TestAgentDrawer() {
   const statusRef = useRef<CallStatus>("idle");
   const active = useRef(false);
   const vad = useVoiceActivityDetection();
+  // AudioWorkletNode.process() fires once per 128-sample render quantum —
+  // sending a WS frame per call (~2.7ms of audio, ~375 msg/s) is far too
+  // fragmented for Deepgram. Buffer on the main thread and flush in
+  // larger batches instead, same chunking pattern AcousticDemo.tsx uses.
+  const captureBufferRef = useRef<Int16Array[]>([]);
+  const captureBufferedSamplesRef = useRef(0);
 
   useEffect(() => {
     setMicSupported(getMicSupport());
@@ -146,6 +155,8 @@ export function TestAgentDrawer() {
     micAudioContextRef.current = null;
     streamRef.current = null;
     wsRef.current = null;
+    captureBufferRef.current = [];
+    captureBufferedSamplesRef.current = 0;
     setStatus("idle");
     setInterim("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -288,10 +299,25 @@ export function TestAgentDrawer() {
       await audioContext.audioWorklet.addModule("/audio-worklets/pcm-capture-processor.js");
       const captureNode = new AudioWorkletNode(audioContext, "pcm-capture-processor");
       captureNodeRef.current = captureNode;
+      captureBufferRef.current = [];
+      captureBufferedSamplesRef.current = 0;
       captureNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (!active.current || ws.readyState !== WebSocket.OPEN) return;
         const downsampled = downsampleTo16kMono(event.data, audioContext.sampleRate);
-        ws.send(downsampled.buffer);
+        captureBufferRef.current.push(downsampled);
+        captureBufferedSamplesRef.current += downsampled.length;
+        if (captureBufferedSamplesRef.current < SEND_CHUNK_SAMPLES) return;
+
+        const chunks = captureBufferRef.current;
+        captureBufferRef.current = [];
+        captureBufferedSamplesRef.current = 0;
+        const merged = new Int16Array(chunks.reduce((sum, c) => sum + c.length, 0));
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.length;
+        }
+        ws.send(merged.buffer);
       };
       source.connect(captureNode);
       const silentGain = audioContext.createGain();
