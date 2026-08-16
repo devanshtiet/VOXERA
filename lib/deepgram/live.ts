@@ -135,6 +135,12 @@ export class DeepgramLiveWrapper {
   }
 
   private handleTranscript(data: any) {
+    // Diagnostic: log every raw event type Deepgram sends (Results,
+    // Metadata, SpeechStarted, UtteranceEnd, ...) — without this we have no
+    // visibility into whether Deepgram is producing anything at all when a
+    // stream never surfaces a transcript.
+    console.log(`[Deepgram Live] event type=${data?.type ?? "unknown"} keys=${data ? Object.keys(data).join(",") : "none"}`);
+
     // Basic duck-typing for a transcript response vs metadata
     if (data && data.channel && data.channel.alternatives) {
       const isFinal = data.is_final || false;
