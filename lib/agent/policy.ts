@@ -77,7 +77,10 @@ export function policyToPrompt(d: PolicyDirectives): string {
     `Pace: ${d.pace}.`,
     d.acknowledgeFirst ? "Open with a genuine acknowledgement of the user's feeling BEFORE any procedural content." : "",
     d.allowUpsell ? "" : "Do NOT upsell or suggest paid add-ons.",
-    d.escalate !== "none" ? `Escalation required: ${d.escalate}. State the escalation clearly in your reply.` : "",
+    d.escalate !== "none"
+      ? `Escalation required: connect the caller to ${d.escalate === "human" ? "a human agent" : "a specialist"}. ` +
+        `Say this naturally, the way a person would say it out loud — never say the literal word "${d.escalate}".`
+      : "",
     d.safetyScript ? `Safety: ${d.safetyScript}` : "",
     ...d.notes.map((n) => `Note: ${n}`),
   ].filter(Boolean);

@@ -1,4 +1,4 @@
-import { getDeepgram } from "./client";
+import WebSocket from "ws";
 
 export type TranscriptCallback = (text: string, isFinal: boolean) => void;
 
@@ -14,11 +14,20 @@ export interface DeepgramLiveOptions {
 /**
  * Deepgram Live STT wrapper with auto-reconnection.
  *
+ * Connects directly via a raw WebSocket rather than @deepgram/sdk's
+ * `listen.v1.connect()` helper. That SDK wrapper (backed by its own
+ * "ReconnectingWebSocket" abstraction) was silently killing the connection
+ * after only a handful of audio frames with no error or close reason
+ * surfaced anywhere — confirmed by isolating every other layer (raw audio
+ * bytes over a bare `ws` server: fine; the same audio streamed straight to
+ * Deepgram's live endpoint with a plain `ws.WebSocket`: fine, real
+ * transcripts back). Bypassing the SDK for this path removes the bug.
+ *
  * Issue #8: Added configurable sample rate (fixes 16kHz vs 8kHz mismatch for Twilio),
  * automatic reconnection with exponential backoff, and audio buffering during reconnects.
  */
 export class DeepgramLiveWrapper {
-  private live: any | null = null;
+  private live: WebSocket | null = null;
   private onTranscript: TranscriptCallback | null = null;
   private sampleRate: number;
   private maxReconnects: number;
@@ -42,46 +51,65 @@ export class DeepgramLiveWrapper {
   public async connect(): Promise<void> {
     this.intentionallyClosed = false;
     this.state = "connecting";
-    const deepgram = getDeepgram();
 
-    // Create the Deepgram Live client using the v5 API
-    this.live = await deepgram.listen.v1.connect({
+    const key = process.env.DEEPGRAM_API_KEY;
+    if (!key) throw new Error("DEEPGRAM_API_KEY is not set");
+
+    const params = new URLSearchParams({
       model: "nova-2",
       language: "en",
       smart_format: "true",
       encoding: "linear16",
-      sample_rate: this.sampleRate,
-      channels: 1,
+      sample_rate: String(this.sampleRate),
+      channels: "1",
       interim_results: "true",
       utterance_end_ms: "1000",
-      Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
     });
+    const url = `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 
-    this.state = "connected";
-    this.reconnectAttempts = 0;
-    console.log(`[Deepgram Live] Connected (sample_rate=${this.sampleRate}).`);
+    await new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket(url, { headers: { Authorization: `Token ${key}` } });
+      this.live = socket;
+      let settled = false;
 
-    // Flush any audio buffered during reconnection
-    if (this.audioBuffer.length > 0) {
-      console.log(`[Deepgram Live] Flushing ${this.audioBuffer.length} buffered audio chunks.`);
-      for (const chunk of this.audioBuffer) {
-        this.sendAudio(chunk);
-      }
-      this.audioBuffer = [];
-    }
+      socket.once("open", () => {
+        settled = true;
+        this.state = "connected";
+        this.reconnectAttempts = 0;
+        console.log(`[Deepgram Live] Connected (sample_rate=${this.sampleRate}).`);
 
-    this.live.on("message", (data: any) => {
-      this.handleTranscript(data);
-    });
+        // Flush any audio buffered during reconnection
+        if (this.audioBuffer.length > 0) {
+          console.log(`[Deepgram Live] Flushing ${this.audioBuffer.length} buffered audio chunks.`);
+          for (const chunk of this.audioBuffer) {
+            this.sendAudio(chunk);
+          }
+          this.audioBuffer = [];
+        }
+        resolve();
+      });
 
-    this.live.on("error", (err: Error) => {
-      console.error("[Deepgram Live] Error:", err);
-      this.handleDisconnect();
-    });
+      socket.on("message", (data: WebSocket.RawData) => {
+        try {
+          this.handleTranscript(JSON.parse(data.toString()));
+        } catch {
+          // ignore malformed frames
+        }
+      });
 
-    this.live.on("close", () => {
-      console.log("[Deepgram Live] Connection closed.");
-      this.handleDisconnect();
+      socket.once("error", (err: Error) => {
+        console.error("[Deepgram Live] Error:", err);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+        this.handleDisconnect();
+      });
+
+      socket.on("close", (code: number, reason: Buffer) => {
+        console.log(`[Deepgram Live] Connection closed. code=${code} reason="${reason.toString()}"`);
+        this.handleDisconnect();
+      });
     });
   }
 
@@ -116,8 +144,8 @@ export class DeepgramLiveWrapper {
   }
 
   public sendAudio(buffer: Uint8Array | Buffer): void {
-    if (this.state === "connected" && this.live && (this.live.readyState === 1 || this.live.socket?.readyState === 1)) {
-      this.live.sendMedia(buffer);
+    if (this.state === "connected" && this.live && this.live.readyState === WebSocket.OPEN) {
+      this.live.send(buffer);
     } else if (this.state === "connecting") {
       // Buffer audio during reconnection so we don't lose caller speech
       this.audioBuffer.push(buffer);

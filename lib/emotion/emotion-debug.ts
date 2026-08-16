@@ -1,8 +1,8 @@
 import type { AcousticFeatures, EmotionLabel, EmotionSignal, MemoryTier, MemoryRecord, Utterance, VAD } from "../types";
 import { CONFIG } from "../config";
-import { detectTextEmotionHF } from "./ml-detect";
+import { detectTextEmotionHF, type HFDetectResult } from "./ml-detect";
 import { detectTextEmotionLexicon, fuseEmotion, type TextEmotionResult } from "./detect";
-import { detectTextEmotionLocalONNX } from "./local-onnx-detect";
+import { detectTextEmotionLocalONNX, type LocalOnnxDetectResult } from "./local-onnx-detect";
 import { detectAudioEmotion } from "./audio-emotion";
 import { buildEmotionContext } from "./context";
 import { importanceScore, taskCriticality, policyFlag } from "./importance";
@@ -78,24 +78,49 @@ function scoreSignal(
  * fusion result production would have selected. Diagnostic-only — does not
  * affect the production detectTextEmotion()/fuseEmotion() behavior, it just
  * runs alongside it. Callers should gate this behind CONFIG.emotion.diagnosticMode.
+ *
+ * `precomputed` lets a caller that already ran detectTextEmotion() (HF +
+ * Lexicon), detectAudioEmotion(), and/or detectTextEmotionLocalONNX() pass
+ * those results straight through instead of this function re-running them
+ * from scratch — a real-time caller doing both the production turn and a
+ * diagnostics breakdown on every turn would otherwise pay for a second HF
+ * API round trip it doesn't need.
  */
 export async function runDiagnosticEmotion(
   text: string,
   acousticFeatures?: AcousticFeatures,
-  history: { stm: Utterance[]; ltmUser: MemoryRecord[] } = { stm: [], ltmUser: [] }
+  history: { stm: Utterance[]; ltmUser: MemoryRecord[] } = { stm: [], ltmUser: [] },
+  precomputed?: {
+    textEmoResult: TextEmotionResult;
+    audioSignal: EmotionSignal | null;
+    localOnnxResult: LocalOnnxDetectResult;
+  }
 ): Promise<DiagnosticEmotionResult> {
   const start = performance.now();
 
-  const [hfResult, lexiconResult, localOnnxResult] = await Promise.all([
-    detectTextEmotionHF(text).catch((err) => {
-      console.warn("[EmotionDiagnostic] HF threw:", err);
-      return { signal: null, latencyMs: 0, timedOut: false };
-    }),
-    Promise.resolve(detectTextEmotionLexicon(text)),
-    detectTextEmotionLocalONNX(text),
-  ]);
+  let hfResult: HFDetectResult;
+  let lexiconResult: ReturnType<typeof detectTextEmotionLexicon>;
+  let localOnnxResult: LocalOnnxDetectResult;
 
-  const audioSignal = acousticFeatures ? detectAudioEmotion(acousticFeatures) : null;
+  if (precomputed) {
+    hfResult = precomputed.textEmoResult.hf;
+    lexiconResult = precomputed.textEmoResult.lexicon;
+    localOnnxResult = precomputed.localOnnxResult;
+  } else {
+    // No precomputed results — run all three concurrently, same as before.
+    [hfResult, lexiconResult, localOnnxResult] = await Promise.all([
+      detectTextEmotionHF(text).catch((err): HFDetectResult => {
+        console.warn("[EmotionDiagnostic] HF threw:", err);
+        return { signal: null, latencyMs: 0, timedOut: false };
+      }),
+      Promise.resolve(detectTextEmotionLexicon(text)),
+      detectTextEmotionLocalONNX(text),
+    ]);
+  }
+
+  const audioSignal = precomputed
+    ? precomputed.audioSignal
+    : (acousticFeatures ? detectAudioEmotion(acousticFeatures) : null);
 
   const hfScore = scoreSignal(text, hfResult.signal, history);
   const lexiconScore = scoreSignal(text, lexiconResult, history);

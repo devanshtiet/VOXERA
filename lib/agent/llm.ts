@@ -78,7 +78,7 @@ export async function generateReply(args: {
           break;
         }
 
-        return { text: finalResponseText.trim(), model: provider.model, usedLive: true, provider: provider.name };
+        return { text: sanitizeReply(finalResponseText), model: provider.model, usedLive: true, provider: provider.name };
       });
 
       console.log(`[LLM] Success via provider: ${provider.name}`);
@@ -91,6 +91,23 @@ export async function generateReply(args: {
 
   console.warn("[LLM] All providers exhausted. Using offline fallback.");
   return { text: offlineFallback(args.user), model: "offline-fallback", usedLive: false, provider: "offline" };
+}
+
+/**
+ * Some Groq-hosted models occasionally emit tool-call-like syntax directly
+ * in the message content instead of populating the structured tool_calls
+ * array (an OpenAI-compatible-adapter quirk, not something we asked for) —
+ * e.g. a literal `<function=cancel_booking>{"bookingId": "..."}</function>`
+ * with a fabricated ID. Strip anything that looks like it before it can
+ * ever reach a caller's ears or the transcript.
+ */
+export function sanitizeReply(text: string): string {
+  return text
+    .replace(/<function[^>]*>[\s\S]*?<\/function>/gi, "")
+    .replace(/<\/?function[^>]*>/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function offlineFallback(userBlock: string): string {
