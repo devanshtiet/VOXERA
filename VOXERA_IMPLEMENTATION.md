@@ -625,3 +625,72 @@ attached to the transcript — and fix a reported black/white theme mismatch acr
   the same drawer instance via the custom event. Full live mic + VAD + barge-in flow needs a real
   microphone and a running `npm run server` — outside this sandbox, left for the user to verify.
 
+### 2026-08-17 — Agent Builder
+
+**Objective**: Let a signed-up user create multiple custom voice agents (name, system prompt,
+greeting, voice) under their account, storable and pickable for both live testing and outbound
+calls — the missing piece for a Vapi-style product experience. Previously `/admin` supported
+exactly one agent per account, configured only for voice/greeting/integrations — there was no
+stored, editable system prompt at all; the LLM's behavior came entirely from code plus knowledge-
+base memory records.
+
+**Changes Implemented**:
+1. **Schema**: the `agents` table already existed (migration_v2.sql, `id/tenant_id/name/type/
+   status`) but had no field for what an agent actually says. `sql/migration_v11.sql` adds
+   `description`, `system_prompt`, `greeting`, `voice_persona`.
+2. **`lib/db/agents.ts`**: CRUD + listing helpers, parameterized over a `SupabaseClient` so they
+   work with both the cookie-bound, RLS-respecting client (admin routes) and the service-role
+   client (orchestrator/`server.ts`, which have no logged-in session to bind to).
+3. **Admin CRUD**: `app/api/admin/agents/route.ts` (list/create) and
+   `app/api/admin/agents/[id]/route.ts` (get/update/delete), authenticated via the existing
+   cookie-session pattern, scoped to the logged-in user's own tenant.
+4. **Public listing**: `app/api/agents/route.ts` mirrors `/api/tenants`' graceful-degradation
+   shape (empty list, not an error, when Supabase is unreachable) but lists individual agents.
+5. **Real prompt injection**: `buildLLMContext()` (`lib/agent/context.ts`) takes an optional
+   `customInstructions` param and injects it as its own block, explicit that it adds detail/
+   personality on top of the CORE RULES and EMOTIONAL PERSONA and never overrides them (safety/
+   escalation behavior stays intact regardless of what an agent's creator writes). `handleTurn()`
+   (`lib/agent/orchestrator.ts`) resolves a new optional `agentId` at the top of the turn — before
+   anything else keys off `clientId` — via `getAgentWithTenant()`, overriding `clientId` with the
+   agent's own tenant (so knowledge/memory scoping follows the agent) and threading its
+   `system_prompt` through. Falls back silently to the plain demo agent on any lookup failure.
+6. **Admin UI**: new `/admin/agents` page (list + create/edit/delete form, voice picker reusing
+   `/admin/settings`'s persona list) and an "Agent Builder" sidebar link in `app/admin/layout.tsx`
+   and `components/admin/AdminMobileNav.tsx`. Each saved agent has a "Test this agent" link to
+   `/demo?agentId=<id>`.
+7. **Test drawer**: `TestAgentDrawer.tsx`'s "Testing: ..." selector now lists real agents from
+   `/api/agents` (was tenants from `/api/tenants`, which is left in place, unused by the drawer
+   now but still valid) and passes `?agentId=` on the WebSocket URL instead of `?clientId=`;
+   reads `?agentId=` from the page URL on mount to support the admin page's deep link, auto-
+   opening the drawer with that agent pre-selected.
+
+**Files Created**:
+- `sql/migration_v11.sql` — `agents` table: description/system_prompt/greeting/voice_persona
+- `lib/db/agents.ts` — CRUD + listing helpers
+- `app/api/admin/agents/route.ts`, `app/api/admin/agents/[id]/route.ts` — authenticated CRUD
+- `app/api/agents/route.ts` — public listing
+- `app/admin/agents/page.tsx` — Agent Builder UI
+- `__tests__/agent/context-custom-instructions.test.ts` — prompt-injection regression tests
+
+**Files Modified**:
+- `lib/agent/context.ts` — `customInstructions` param + injected prompt block
+- `lib/agent/orchestrator.ts` — `agentId` resolution, `agent` field on `TurnTrace`
+- `app/api/turn/route.ts` — `agentId` in the request schema
+- `server.ts` — parses `?agentId=` from the WS URL, passes it through
+- `app/_components/TestAgentDrawer.tsx` — agent selector + deep-link support
+- `app/admin/layout.tsx`, `components/admin/AdminMobileNav.tsx` — sidebar nav entry
+
+**Validation Performed**:
+- `npx tsc --noEmit` → clean
+- `npm run lint` → **0 errors, 0 warnings**
+- `npx vitest run` → **284 tests passed** across 31 files
+- `npm run build` → **Build succeeded**; `/admin/agents`, `/api/admin/agents`,
+  `/api/admin/agents/[id]`, `/api/agents` all present in the route manifest
+- Live-verified: `/api/agents` returns `{agents: []}` gracefully with Supabase unreachable (this
+  sandbox's actual state); `/admin/agents` correctly redirects an unauthenticated request to
+  `/login`; `/api/turn` with a bogus `agentId` falls back cleanly to the demo agent rather than
+  erroring; the `/demo` drawer's selector renders "Demo agent (no custom agents found...)"
+  correctly in-browser. The full authenticated create → test → call loop needs a real Supabase
+  connection and login session — outside this sandbox, left for the user to verify after applying
+  `sql/migration_v11.sql`.
+

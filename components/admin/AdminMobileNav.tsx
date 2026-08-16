@@ -11,12 +11,14 @@ import {
   Sparkles,
   Users,
   PhoneCall,
+  Bot,
   Menu,
   X,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/admin", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/admin/agents", icon: Bot, label: "Agent Builder" },
   { href: "/admin/try-call", icon: PhoneCall, label: "Try a Call" },
   { href: "/admin/tenants", icon: Users, label: "Tenants" },
   { href: "/admin/sessions", icon: MessageSquare, label: "Sessions" },

@@ -191,12 +191,20 @@ function inferLabelScored(
   if (f.pitchVariation > 0.4) scores.excitement += 0.3;
   if (f.energy > 0.4 && f.pitchVariation > 0.5) scores.excitement += 0.2;
 
-  // ── Sadness: low energy, low pitch, slow rate, low variation, falling contour
-  if (f.energy < 0.3) scores.sadness += 0.25;
-  if (f.pitch < 0.4) scores.sadness += 0.2;
-  if (f.rate < 0.4) scores.sadness += 0.2;
-  if (f.pitchVariation < 0.2) scores.sadness += 0.15;
-  if (f.contour === "falling") scores.sadness += 0.15;
+  // ── Sadness: previously scored independently on low energy OR low pitch OR
+  // slow rate OR low variation OR a falling contour — each alone is also
+  // exactly what plain calm/neutral speech or warm gratitude sounds like
+  // (see the gratitude rules below, and the "quiet" soft nudge further
+  // down), so nearly any unhurried, non-animated speaker racked up a higher
+  // sadness score than anything else purely from being calm. This was the
+  // "everything gets read as sad" bias reported in live testing. Now energy
+  // AND pitch must BOTH be genuinely low together for the primary signal —
+  // a single weak cue is no longer enough — and pitch variation/contour are
+  // downgraded to smaller supporting nudges that also require low energy.
+  if (f.energy < 0.25 && f.pitch < 0.35) scores.sadness += 0.35;
+  if (f.energy < 0.3 && f.rate < 0.3) scores.sadness += 0.15;
+  if (f.pitchVariation < 0.15 && f.energy < 0.35) scores.sadness += 0.15;
+  if (f.contour === "falling" && f.energy < 0.3) scores.sadness += 0.1;
 
   // ── Crying/Sobbing → maps to distress (NOT sadness):
   // High pitch + high energy modulation + broken speech (many short pauses) + unstable contour

@@ -19,10 +19,10 @@ const WS_BASE_URL = process.env.NEXT_PUBLIC_REALTIME_WS_URL || "ws://localhost:3
 
 type CallStatus = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 
-interface Tenant {
+interface Agent {
   id: string;
   name: string;
-  authUserId: string;
+  description: string | null;
 }
 
 interface TurnPolicy {
@@ -33,20 +33,47 @@ interface TurnPolicy {
   notes: string[];
 }
 
+interface MemorySnippet {
+  id: string;
+  summary: string;
+  topic: string;
+  emotion: string;
+  importance: number;
+  ts: number;
+}
+
 interface TurnMemory {
   write?: { tier: string; recordId?: string; merged?: boolean };
-  retrieved?: { mtmIds: string[]; ltmUserIds: string[]; ltmClientIds: string[] };
+  retrieved?: {
+    mtmIds: string[];
+    ltmUserIds: string[];
+    ltmClientIds: string[];
+    mtmSnippets?: MemorySnippet[];
+    ltmUserSnippets?: MemorySnippet[];
+    ltmClientSnippets?: MemorySnippet[];
+  };
+}
+
+interface TurnTimings {
+  sttMs?: number;
+  emotionMs: number;
+  retrievalMs: number;
+  llmMs: number;
+  ttsMs?: number;
+  totalMs: number;
 }
 
 interface TranscriptTurn {
   id: string;
   role: "user" | "assistant";
   text: string;
+  ts: number;
   emotion?: string;
   diagnostics?: DiagnosticEmotionResult;
   cai?: { score: number; category: string };
   policy?: TurnPolicy;
   memory?: TurnMemory;
+  timings?: TurnTimings;
 }
 
 function downsampleTo16kMono(input: Float32Array, inputSampleRate: number): Int16Array {
@@ -72,6 +99,166 @@ function readLevel(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number
   return Math.min(1, Math.sqrt(sumSq / buf.length) * 4); // *4 — RMS of speech is quiet relative to full-scale
 }
 
+/** Real per-stage wall-clock timing for one reply, as a proportional bar —
+ * the "Live Engine Console" pipeline visual's stages made concrete instead
+ * of decorative. sttMs approximates listening duration from audio length
+ * (true STT compute time isn't cleanly measurable mid-stream), the rest are
+ * exact measurements from the orchestrator and TTS call. */
+function PipelineLatencyBar({ timings }: { timings: TurnTimings }) {
+  const segments = [
+    { key: "stt", label: "Listen", ms: timings.sttMs ?? 0, color: "bg-sky-400" },
+    { key: "emotion", label: "Analyze", ms: timings.emotionMs, color: "bg-violet-400" },
+    { key: "retrieval", label: "Memory", ms: timings.retrievalMs, color: "bg-fuchsia-400" },
+    { key: "llm", label: "LLM", ms: timings.llmMs, color: "bg-amber-400" },
+    { key: "tts", label: "Voice", ms: timings.ttsMs ?? 0, color: "bg-cyan-400" },
+  ].filter((s) => s.ms > 0);
+  const total = segments.reduce((s, seg) => s + seg.ms, 0) || 1;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex h-2 rounded-full overflow-hidden bg-[var(--console-surface)]">
+        {segments.map((s) => (
+          <div key={s.key} className={s.color} style={{ width: `${(s.ms / total) * 100}%` }} title={`${s.label}: ${s.ms}ms`} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9.5px] font-mono text-[var(--console-text-dim)]">
+        {segments.map((s) => (
+          <span key={s.key} className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${s.color}`} /> {s.label} {s.ms}ms
+          </span>
+        ))}
+        <span className="ml-auto text-[var(--console-text)] font-semibold">total {timings.totalMs}ms</span>
+      </div>
+    </div>
+  );
+}
+
+/** Actual retrieved memory content grouped by tier — the evidence a judge
+ * (or the LLM's own [MEM_ID] citations) can point at, not just a count. */
+function MemoryRetrievalDetail({ retrieved }: { retrieved: NonNullable<TurnMemory["retrieved"]> }) {
+  const groups: { key: string; label: string; ids: string[]; snippets?: MemorySnippet[] }[] = [
+    { key: "mtm", label: "Recent (MTM)", ids: retrieved.mtmIds, snippets: retrieved.mtmSnippets },
+    { key: "ltmUser", label: "Long-term (user)", ids: retrieved.ltmUserIds, snippets: retrieved.ltmUserSnippets },
+    { key: "ltmClient", label: "Client knowledge", ids: retrieved.ltmClientIds, snippets: retrieved.ltmClientSnippets },
+  ];
+  const total = groups.reduce((s, g) => s + g.ids.length, 0);
+  if (total === 0) {
+    return (
+      <div className="text-[var(--console-text-dim)] mt-0.5">
+        No memories retrieved for this reply — nothing in this session or long-term store matched yet.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-col gap-2">
+      {groups.map(
+        (g) =>
+          g.ids.length > 0 && (
+            <div key={g.key}>
+              <div className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">
+                {g.label} ({g.ids.length})
+              </div>
+              {g.snippets && g.snippets.length > 0 ? (
+                <ul className="mt-0.5 flex flex-col gap-1">
+                  {g.snippets.slice(0, 3).map((s) => (
+                    <li
+                      key={s.id}
+                      className="text-[var(--console-text)] text-[10.5px] leading-snug rounded-lg bg-[var(--console-surface-raised)] border border-[var(--console-border)] px-2 py-1.5"
+                    >
+                      <span className="font-mono text-[9px] text-[var(--console-text-dim)] uppercase mr-1">[{s.topic}]</span>
+                      {s.summary}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-[10px] text-[var(--console-text-dim)] italic">snippet text unavailable</div>
+              )}
+            </div>
+          )
+      )}
+    </div>
+  );
+}
+
+/** Session-level rollup computed from turns already stored client-side —
+ * turns "I had a conversation" into a measurable outcome: CAI trend,
+ * how much escalation was needed, how memory grew. Updates live as the
+ * call progresses, not just once it ends. */
+function SessionScorecard({ turns }: { turns: TranscriptTurn[] }) {
+  const assistantTurns = turns.filter((t) => t.role === "assistant");
+  if (assistantTurns.length === 0) return null;
+
+  const caiScores = assistantTurns.filter((t) => t.cai).map((t) => t.cai!.score);
+  const caiFirst = caiScores[0];
+  const caiLast = caiScores[caiScores.length - 1];
+  const caiAvg = caiScores.length > 0 ? Math.round(caiScores.reduce((a, b) => a + b, 0) / caiScores.length) : null;
+  const caiDelta = caiScores.length > 1 ? caiLast - caiFirst : 0;
+
+  const escalatedTurns = assistantTurns.filter((t) => t.policy && t.policy.escalate !== "none");
+  const highestEscalation = escalatedTurns.some((t) => t.policy?.escalate === "human")
+    ? "human"
+    : escalatedTurns.length > 0
+      ? "tier2"
+      : "none";
+
+  const memoryWrites = assistantTurns.filter((t) => t.memory?.write?.recordId);
+  const emotionCounts = new Map<string, number>();
+  for (const t of assistantTurns) {
+    if (!t.emotion) continue;
+    emotionCounts.set(t.emotion, (emotionCounts.get(t.emotion) ?? 0) + 1);
+  }
+  const dominantEmotion = [...emotionCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  const durationMs = turns.length > 1 ? turns[turns.length - 1].ts - turns[0].ts : 0;
+  const durationLabel = durationMs > 0 ? `${Math.round(durationMs / 1000)}s` : "—";
+
+  return (
+    <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-surface)] p-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-[11px]">
+      <ScorecardStat label="Turns" value={String(assistantTurns.length)} sub={durationLabel} />
+      <ScorecardStat
+        label="Avg CAI"
+        value={caiAvg !== null ? String(caiAvg) : "—"}
+        sub={caiDelta !== 0 ? (caiDelta > 0 ? `↑ +${caiDelta}` : `↓ ${caiDelta}`) : undefined}
+        subColor={caiDelta > 0 ? "text-emerald-400" : caiDelta < 0 ? "text-red-400" : undefined}
+      />
+      <ScorecardStat
+        label="Escalations"
+        value={String(escalatedTurns.length)}
+        sub={highestEscalation !== "none" ? `peak: ${highestEscalation}` : undefined}
+        subColor={highestEscalation === "human" ? "text-red-400" : highestEscalation === "tier2" ? "text-amber-400" : undefined}
+      />
+      <ScorecardStat label="Memories written" value={String(memoryWrites.length)} />
+      {dominantEmotion && (
+        <div className="col-span-2 flex items-center gap-1.5 text-[10.5px] text-[var(--console-text-dim)] pt-0.5 border-t border-[var(--console-border)] mt-0.5">
+          Dominant emotion this session:{" "}
+          <span className="font-semibold text-[var(--console-text)] capitalize">{dominantEmotion}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScorecardStat({
+  label,
+  value,
+  sub,
+  subColor,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  subColor?: string;
+}) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">{label}</span>
+      <span className="flex items-baseline gap-1.5">
+        <span className="text-[16px] font-bold text-[var(--console-text)] leading-tight">{value}</span>
+        {sub && <span className={`text-[9.5px] font-mono ${subColor ?? "text-[var(--console-text-dim)]"}`}>{sub}</span>}
+      </span>
+    </div>
+  );
+}
+
 export function TestAgentDrawer() {
   const [open, setOpen] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
@@ -80,10 +267,15 @@ export function TestAgentDrawer() {
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [interim, setInterim] = useState("");
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<string>(""); // "" = demo agent
-  const [activeTenantName, setActiveTenantName] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(""); // "" = demo agent
+  const [activeAgentName, setActiveAgentName] = useState<string | null>(null);
   const [showReasoning, setShowReasoning] = useState(true);
+  // Which turn the analytics column is showing. Auto-advances to each new
+  // reply as it arrives (the original "always show what just happened"
+  // behavior); clicking an older bubble in the transcript pins it here so
+  // it can be inspected, until the next new reply auto-advances again.
+  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const micAudioContextRef = useRef<AudioContext | null>(null);
@@ -111,18 +303,30 @@ export function TestAgentDrawer() {
     setMicSupported(getMicSupport());
   }, []);
 
-  // Fetch the list of real configured agents (tenants) once the drawer is
-  // first opened, so "test my own agent" doesn't require reloading the page.
+  // Fetch the list of real Agent Builder agents once the drawer is first
+  // opened, so "test my own agent" doesn't require reloading the page.
   // Fails silently to an empty list (falls back to the demo agent) — most
   // commonly because Supabase isn't reachable in this environment, which
-  // /api/tenants already degrades gracefully for.
+  // /api/agents already degrades gracefully for.
   useEffect(() => {
-    if (!open || tenants.length > 0) return;
-    fetch("/api/tenants")
+    if (!open || agents.length > 0) return;
+    fetch("/api/agents")
       .then((r) => r.json())
-      .then((data: { tenants: Tenant[] }) => setTenants(data.tenants ?? []))
+      .then((data: { agents: Agent[] }) => setAgents(data.agents ?? []))
       .catch(() => {});
-  }, [open, tenants.length]);
+  }, [open, agents.length]);
+
+  // Deep-link support: /demo?agentId=<id> (used by the "Test this agent"
+  // button in /admin/agents) pre-selects that agent and opens the drawer
+  // automatically, once its info has loaded.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const agentId = params.get("agentId");
+    if (agentId) {
+      setSelectedAgentId(agentId);
+      setOpen(true);
+    }
+  }, []);
 
   // Lets other pages (e.g. the /demo mode switcher's "Live Call" CTA) open
   // this single site-wide drawer instance without prop-drilling or context.
@@ -224,16 +428,18 @@ export function TestAgentDrawer() {
     setStatus("connecting");
     setTurns([]);
     setEmotionHistory([]);
+    setSelectedTurnId(null);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const selectedTenant = tenants.find((t) => t.id === selectedTenantId);
-      const wsUrl = selectedTenant
-        ? `${WS_BASE_URL}?clientId=${encodeURIComponent(selectedTenant.authUserId)}`
+      const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+      const effectiveAgentId = selectedAgent?.id ?? (selectedAgentId || undefined);
+      const wsUrl = effectiveAgentId
+        ? `${WS_BASE_URL}?agentId=${encodeURIComponent(effectiveAgentId)}`
         : WS_BASE_URL;
-      setActiveTenantName(selectedTenant?.name ?? null);
+      setActiveAgentName(selectedAgent?.name ?? null);
 
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
@@ -269,7 +475,7 @@ export function TestAgentDrawer() {
               break;
             case "transcript_final":
               setInterim("");
-              setTurns((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text: msg.text }]);
+              setTurns((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text: msg.text, ts: Date.now() }]);
               break;
             case "turn_start":
               setStatus("thinking");
@@ -277,19 +483,23 @@ export function TestAgentDrawer() {
             case "reply_text": {
               const emotion = msg.trace?.emotion?.current;
               const diagnostics: DiagnosticEmotionResult | undefined = msg.trace?.emotionDiagnostics;
+              const turnId: string = msg.turnId ?? `a-${Date.now()}`;
               setTurns((prev) => [
                 ...prev,
                 {
-                  id: `a-${Date.now()}`,
+                  id: turnId,
                   role: "assistant",
                   text: msg.text,
+                  ts: Date.now(),
                   emotion: emotion?.label,
                   diagnostics,
                   cai: msg.trace?.cai ? { score: msg.trace.cai.score, category: msg.trace.cai.category } : undefined,
                   policy: msg.trace?.policy,
                   memory: { write: msg.trace?.memoryWrite, retrieved: msg.trace?.retrieved },
+                  timings: msg.trace?.timings,
                 },
               ]);
+              setSelectedTurnId(turnId);
               if (emotion) {
                 setEmotionHistory((h) => [...h.slice(-59), { ts: Date.now(), label: emotion.label, intensity: emotion.intensity }]);
               }
@@ -297,6 +507,17 @@ export function TestAgentDrawer() {
             }
             case "reply_audio": {
               setStatus("speaking");
+              // Synthesis finishes after reply_text already landed — merge its
+              // ttsMs into the matching turn (by server-assigned turnId)
+              // instead of waiting to send timings all at once, so the text
+              // and analytics still appear the instant they're ready.
+              if (msg.turnId && typeof msg.ttsMs === "number") {
+                setTurns((prev) =>
+                  prev.map((t) =>
+                    t.id === msg.turnId && t.timings ? { ...t, timings: { ...t.timings, ttsMs: msg.ttsMs } } : t
+                  )
+                );
+              }
               const audio = playerRef.current;
               if (audio) {
                 audio.src = `data:${msg.mime};base64,${msg.audio}`;
@@ -382,17 +603,23 @@ export function TestAgentDrawer() {
       setStatus("error");
       endCall();
     }
-  }, [endCall, startLevelLoop, vad, bargeIn, tenants, selectedTenantId]);
+  }, [endCall, startLevelLoop, vad, bargeIn, agents, selectedAgentId]);
 
   const isLive = status !== "idle" && status !== "error";
 
-  // The right-hand analytics panel always reflects the *latest* turn rather
-  // than accumulating — that's what keeps it a fast, glanceable "what's
-  // happening right now" view instead of another scrolling list to chase.
-  const latestAssistantTurn = useMemo(
-    () => [...turns].reverse().find((t) => t.role === "assistant" && t.diagnostics),
+  const assistantTurnsWithDiagnostics = useMemo(
+    () => turns.filter((t) => t.role === "assistant" && t.diagnostics),
     [turns]
   );
+  const latestAssistantTurn = assistantTurnsWithDiagnostics[assistantTurnsWithDiagnostics.length - 1];
+  // The analytics panel shows whichever turn is selected — by default the
+  // latest one (auto-advances as replies arrive), or an older turn the user
+  // clicked in the transcript to scrub back and inspect its reasoning.
+  const selectedTurn = useMemo(
+    () => assistantTurnsWithDiagnostics.find((t) => t.id === selectedTurnId) ?? latestAssistantTurn,
+    [assistantTurnsWithDiagnostics, selectedTurnId, latestAssistantTurn]
+  );
+  const isViewingLatest = !selectedTurn || selectedTurn.id === latestAssistantTurn?.id;
 
   return (
     <>
@@ -447,32 +674,32 @@ export function TestAgentDrawer() {
           </button>
         </div>
 
-        {/* Agent selector — pick which configured tenant's actual prompt,
-            knowledge base, and brand-voice memory to test against, instead
-            of always the hardcoded demo agent. Locked once a call starts. */}
+        {/* Agent selector — pick which custom Agent Builder agent's actual
+            prompt, persona, and knowledge base to test against, instead of
+            always the hardcoded demo agent. Locked once a call starts. */}
         <div className="flex-none border-b border-[var(--console-border)] px-5 py-2 flex items-center gap-2 text-[11px]">
           <span className="font-mono uppercase tracking-widest text-[var(--console-text-dim)] flex-none">Testing:</span>
           {isLive ? (
-            <span className="font-semibold text-[var(--console-text)]">{activeTenantName ?? "Demo agent"}</span>
+            <span className="font-semibold text-[var(--console-text)]">{activeAgentName ?? "Demo agent"}</span>
           ) : (
             <div className="relative flex-1 min-w-0 max-w-[280px]">
               <select
-                value={selectedTenantId}
-                onChange={(e) => setSelectedTenantId(e.target.value)}
+                value={selectedAgentId}
+                onChange={(e) => setSelectedAgentId(e.target.value)}
                 className="w-full appearance-none bg-[var(--console-surface-raised)] border border-[var(--console-border)] rounded-lg px-2.5 py-1 pr-6 text-[11px] font-semibold text-[var(--console-text)] focus:outline-none focus:border-[var(--console-border-active)]"
               >
                 <option value="">Demo agent</option>
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id} className="bg-[var(--console-surface)] text-[var(--console-text)]">
-                    {t.name}
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id} className="bg-[var(--console-surface)] text-[var(--console-text)]">
+                    {a.name}
                   </option>
                 ))}
               </select>
               <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--console-text-dim)]" />
             </div>
           )}
-          {tenants.length === 0 && (
-            <span className="text-[var(--console-text-dim)]">(no configured agents found — testing the demo agent)</span>
+          {agents.length === 0 && (
+            <span className="text-[var(--console-text-dim)]">(no custom agents found — testing the demo agent)</span>
           )}
         </div>
 
@@ -480,18 +707,31 @@ export function TestAgentDrawer() {
             arrives, conversation keeps flowing independently on the right —
             neither one waits on or pushes around the other. */}
         <div className="flex-1 flex flex-col sm:flex-row min-h-0">
-          {/* LEFT — live analytics, always reflecting the latest turn */}
+          {/* LEFT — live analytics for whichever turn is selected */}
           <div className="sm:w-[360px] flex-none min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4 border-b sm:border-b-0 sm:border-r border-[var(--console-border)]">
             <div>
-              <div className="voxera-console-label text-[10px] font-bold mb-2">
-                Live Analytics {status === "thinking" && <span className="text-[var(--console-cyan)] normal-case">· updating…</span>}
+              <div className="flex items-center justify-between mb-2">
+                <div className="voxera-console-label text-[10px] font-bold">
+                  {isViewingLatest ? "Live Analytics" : "Reasoning Trace"}{" "}
+                  {status === "thinking" && isViewingLatest && (
+                    <span className="text-[var(--console-cyan)] normal-case">· updating…</span>
+                  )}
+                </div>
+                {!isViewingLatest && (
+                  <button
+                    onClick={() => setSelectedTurnId(latestAssistantTurn?.id ?? null)}
+                    className="text-[9.5px] font-mono uppercase tracking-wide text-[var(--console-violet)] hover:brightness-125 px-2 py-0.5 rounded-full border border-[var(--console-violet)]/30 bg-[var(--console-violet)]/10 flex-none"
+                  >
+                    ↳ Jump to latest
+                  </button>
+                )}
               </div>
-              {latestAssistantTurn?.diagnostics ? (
+              {selectedTurn?.diagnostics ? (
                 <>
-                  <EngineDiagnosticPanel diagnostics={latestAssistantTurn.diagnostics} compact />
-                  {latestAssistantTurn.cai && (
+                  <EngineDiagnosticPanel diagnostics={selectedTurn.diagnostics} compact />
+                  {selectedTurn.cai && (
                     <div className="mt-2 text-[10px] font-mono text-[var(--console-text-dim)]">
-                      CAI {latestAssistantTurn.cai.score}/100 · {latestAssistantTurn.cai.category}
+                      CAI {selectedTurn.cai.score}/100 · {selectedTurn.cai.category}
                     </div>
                   )}
                 </>
@@ -502,7 +742,14 @@ export function TestAgentDrawer() {
               )}
             </div>
 
-            {(latestAssistantTurn?.policy || latestAssistantTurn?.memory) && (
+            {selectedTurn?.timings && (
+              <div>
+                <div className="voxera-console-label text-[9px] mb-1.5">Pipeline Latency — this reply</div>
+                <PipelineLatencyBar timings={selectedTurn.timings} />
+              </div>
+            )}
+
+            {(selectedTurn?.policy || selectedTurn?.memory) && (
               <div>
                 <button
                   onClick={() => setShowReasoning((s) => !s)}
@@ -515,41 +762,37 @@ export function TestAgentDrawer() {
                 </button>
                 {showReasoning && (
                   <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-surface)] p-3 flex flex-col gap-3 text-[11px]">
-                    {latestAssistantTurn.policy && (
+                    {selectedTurn.policy && (
                       <div>
                         <div className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] mb-1">Policy applied</div>
                         <div className="text-[var(--console-text)]">
-                          Pace: <span className="font-semibold capitalize">{latestAssistantTurn.policy.pace}</span>
-                          {latestAssistantTurn.policy.acknowledgeFirst && " · acknowledge-first"}
-                          {!latestAssistantTurn.policy.allowUpsell && " · no upsell"}
-                          {latestAssistantTurn.policy.escalate !== "none" && (
-                            <span className="text-amber-400"> · escalate: {latestAssistantTurn.policy.escalate}</span>
+                          Pace: <span className="font-semibold capitalize">{selectedTurn.policy.pace}</span>
+                          {selectedTurn.policy.acknowledgeFirst && " · acknowledge-first"}
+                          {!selectedTurn.policy.allowUpsell && " · no upsell"}
+                          {selectedTurn.policy.escalate !== "none" && (
+                            <span className="text-amber-400"> · escalate: {selectedTurn.policy.escalate}</span>
                           )}
                         </div>
-                        {latestAssistantTurn.policy.notes.length > 0 && (
+                        {selectedTurn.policy.notes.length > 0 && (
                           <ul className="mt-1 list-disc list-inside text-[var(--console-text-dim)]">
-                            {latestAssistantTurn.policy.notes.map((n, i) => <li key={i}>{n}</li>)}
+                            {selectedTurn.policy.notes.map((n, i) => <li key={i}>{n}</li>)}
                           </ul>
                         )}
                       </div>
                     )}
-                    {latestAssistantTurn.memory && (
+                    {selectedTurn.memory && (
                       <div>
                         <div className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] mb-1 flex items-center gap-1.5">
                           <Database className="w-3 h-3" /> Memory
                         </div>
-                        {latestAssistantTurn.memory.write && (
+                        {selectedTurn.memory.write && (
                           <div className="text-[var(--console-text)]">
-                            Wrote to <span className="font-semibold">{latestAssistantTurn.memory.write.tier}</span>
-                            {latestAssistantTurn.memory.write.merged && " (merged with existing memory)"}
+                            Wrote to <span className="font-semibold">{selectedTurn.memory.write.tier}</span>
+                            {selectedTurn.memory.write.merged && " (merged with existing memory)"}
                           </div>
                         )}
-                        {latestAssistantTurn.memory.retrieved && (
-                          <div className="text-[var(--console-text-dim)] mt-0.5">
-                            Retrieved {latestAssistantTurn.memory.retrieved.mtmIds.length} recent +{" "}
-                            {latestAssistantTurn.memory.retrieved.ltmUserIds.length} long-term-user +{" "}
-                            {latestAssistantTurn.memory.retrieved.ltmClientIds.length} client memories for this reply
-                          </div>
+                        {selectedTurn.memory.retrieved && (
+                          <MemoryRetrievalDetail retrieved={selectedTurn.memory.retrieved} />
                         )}
                       </div>
                     )}
@@ -562,6 +805,13 @@ export function TestAgentDrawer() {
               <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
               <EmotionTimeline history={emotionHistory} />
             </div>
+
+            {turns.length > 0 && (
+              <div>
+                <div className="voxera-console-label text-[9px] mb-1.5">Session Summary</div>
+                <SessionScorecard turns={turns} />
+              </div>
+            )}
           </div>
 
           {/* RIGHT — continuous conversation */}
@@ -576,23 +826,34 @@ export function TestAgentDrawer() {
               </div>
             ) : (
               <>
-                {turns.map((t) => (
-                  <div
-                    key={t.id}
-                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-snug flex flex-col gap-1 ${
-                      t.role === "user"
-                        ? "self-end bg-[var(--console-violet)]/20 text-[var(--console-text)]"
-                        : "self-start bg-[var(--console-surface-raised)] border border-[var(--console-border)] text-[var(--console-text)]"
-                    }`}
-                  >
-                    {t.text}
-                    {t.role === "assistant" && t.emotion && (
-                      <span className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">
-                        responded to: {t.emotion}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                {turns.map((t) => {
+                  const inspectable = t.role === "assistant" && !!t.diagnostics;
+                  const isSelected = inspectable && selectedTurn?.id === t.id && !isViewingLatest;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={inspectable ? () => setSelectedTurnId(t.id) : undefined}
+                      className={`max-w-[85%] text-left rounded-2xl px-4 py-2.5 text-[13px] leading-snug flex flex-col gap-1 transition-colors ${
+                        t.role === "user"
+                          ? "self-end bg-[var(--console-violet)]/20 text-[var(--console-text)] cursor-default"
+                          : `self-start bg-[var(--console-surface-raised)] border text-[var(--console-text)] ${
+                              isSelected
+                                ? "border-[var(--console-violet)]/60 shadow-[0_0_0_1px_rgba(167,139,250,0.3)]"
+                                : "border-[var(--console-border)]"
+                            } ${inspectable ? "cursor-pointer hover:border-[var(--console-violet)]/40" : "cursor-default"}`
+                      }`}
+                    >
+                      {t.text}
+                      {t.role === "assistant" && t.emotion && (
+                        <span className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] flex items-center gap-1">
+                          responded to: {t.emotion}
+                          {inspectable && <span className="normal-case">· click to inspect reasoning</span>}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
                 {interim && (
                   <div className="self-end max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-snug italic text-[var(--console-text-dim)] bg-[var(--console-violet)]/[0.08] border border-dashed border-[var(--console-violet)]/30">
                     {interim}
