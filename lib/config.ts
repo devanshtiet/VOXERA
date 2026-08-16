@@ -40,7 +40,21 @@ export const CONFIG = {
     } as Record<string, { model: string; label: string }>,
   },
   llm: {
+    // Order is the fallback priority, tried top to bottom by generateReply()
+    // (lib/agent/llm.ts) until one succeeds: ZenMux first, then the existing
+    // Groq key-rotation setup, then OpenAI. Each entry's `envKey` is read by
+    // KeyRotator (lib/util/keys.ts), which already supports comma-separated
+    // multi-key rotation for ANY of these — ZenMux gets that for free, not
+    // just Groq. baseURL/model are env-overridable (ZENMUX_BASE_URL /
+    // ZENMUX_MODEL) since ZenMux's exact model catalog is account/deployment
+    // -specific; the values below are only fallback defaults.
     providers: [
+      {
+        name: "zenmux",
+        baseURL: process.env.ZENMUX_BASE_URL || "https://zenmux.ai/api/v1",
+        model: process.env.ZENMUX_MODEL || "openai/gpt-4o-mini",
+        envKey: "ZENMUX_API_KEY",
+      },
       { name: "groq", baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", envKey: "GROQ_API_KEYS" },
       { name: "openai", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini", envKey: "OPENAI_API_KEY" },
     ] as Array<{ name: string; baseURL: string; model: string; envKey: string }>,
