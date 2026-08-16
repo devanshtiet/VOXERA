@@ -39,6 +39,16 @@ html {
   background-color: #FAFBFF;
 }
 
+/* /demo is the one page that inverts to the dark console theme (see
+   .voxera-demo-dark below) — without this, overscroll/rubber-band scrolling
+   flashes the light html/body background behind it, since body's own
+   background resolves from --color-bg-base at body's scope (light), one
+   level above where .voxera-demo-dark redefines that token on <main>. */
+html:has(.voxera-demo-dark),
+body:has(.voxera-demo-dark) {
+  background-color: var(--console-bg);
+}
+
 :root {
   --lp-bg: #FAFBFF;
   --lp-bg-surface: #F2F4FF;
@@ -188,6 +198,29 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .voxera-orb::before, .voxera-orb::after, .voxera-orb-core { transition: none; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   /demo PAGE — dark console theme
+   Every component under this scope reads color through the semantic
+   --color-* tokens (bg-[var(--color-bg-base)], text-[var(--color-text-secondary)],
+   etc.) rather than hardcoded Tailwind palette classes, so redefining those
+   tokens inside this one scope re-themes the whole page — including the
+   Text/Acoustic/Phone-Call mode panels — to match the Live Test Call
+   drawer's dark instrument-panel look, without touching every component file.
+   ════════════════════════════════════════════════════════════════════════════ */
+.voxera-demo-dark {
+  color-scheme: dark;
+  --color-bg-base:     var(--console-bg);
+  --color-bg-surface:  var(--console-surface);
+  --color-bg-elevated: var(--console-surface-raised);
+  --color-text-primary:   var(--console-text);
+  --color-text-secondary: #A8ABC8;
+  --color-text-muted:     var(--console-text-dim);
+  --color-border-subtle: var(--console-border);
+  --color-border-active: var(--console-border-active);
+  --color-accent-violet: var(--console-violet);
+  --color-accent-cyan:   var(--console-cyan);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════

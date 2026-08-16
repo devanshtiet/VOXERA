@@ -612,7 +612,7 @@ export function TestAgentDrawer() {
 
       {open && (
         <div
-          className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-[1px] sm:hidden"
+          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-md transition-opacity duration-300"
           onClick={() => setOpen(false)}
           aria-hidden="true"
         />

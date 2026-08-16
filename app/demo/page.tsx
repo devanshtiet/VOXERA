@@ -9,9 +9,10 @@ export const metadata = {
 
 export default function DemoPage() {
   return (
-    <main className="flex min-h-screen flex-col bg-[var(--color-bg-base)] font-body text-[var(--color-text-primary)]">
+    <main className="voxera-demo-dark flex min-h-screen flex-col bg-[var(--color-bg-base)] font-body text-[var(--color-text-primary)]">
       {/* Background ambient glow */}
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[var(--color-accent-cyan)] rounded-full blur-[150px] opacity-5 pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[var(--color-accent-violet)] rounded-full blur-[150px] opacity-10 pointer-events-none" />
+      <div className="absolute top-40 left-0 w-[600px] h-[600px] bg-[var(--color-accent-cyan)] rounded-full blur-[150px] opacity-[0.06] pointer-events-none" />
 
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 py-10 relative z-10">
         <header className="flex flex-col gap-3 mb-4 border-b border-[var(--color-border-subtle)] pb-7">
