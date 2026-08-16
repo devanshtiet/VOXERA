@@ -63,6 +63,15 @@ export class DeepgramLiveWrapper {
       sample_rate: String(this.sampleRate),
       channels: "1",
       interim_results: "true",
+      // `is_final` (the flag handleTranscript() below actually acts on to
+      // trigger a reply) is governed by `endpointing`, not `utterance_end_ms`
+      // — left unset, Deepgram finalizes on its own short default silence
+      // gap, which fires on an ordinary mid-sentence breath or pause and
+      // makes the agent start replying before the caller finished talking
+      // (reported live: "starts talking before I finished my sentence").
+      // 500ms gives natural pauses room without making the agent feel slow
+      // to respond once the caller is actually done.
+      endpointing: "500",
       utterance_end_ms: "1000",
     });
     const url = `wss://api.deepgram.com/v1/listen?${params.toString()}`;

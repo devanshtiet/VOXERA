@@ -268,6 +268,62 @@ describe("Issue #28: Upgraded acoustic emotion engine", () => {
     });
   });
 
+  describe("Sadness bias regression — calm/neutral/positive speech must not default to sadness", () => {
+    it("does not classify moderate-energy, unhurried, calm speech as sadness (was the reported live-testing bug)", () => {
+      const calmNeutral: AcousticFeatures = {
+        rmsEnergy: 2200,
+        zeroCrossingRate: 0.12,
+        pitchHz: 190,
+        pitchVariation: 0.22,
+        speakingRateWPM: 105,
+        pauseDurationMs: 150,
+        pauseCount: 1,
+        durationMs: 4000,
+        energyModulationRate: 0.15,
+        pitchContour: "falling", // ordinary declarative sentences end falling — not sadness-specific
+      };
+      const emotion = detectAudioEmotion(calmNeutral);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).not.toBe("sadness");
+    });
+
+    it("does not classify a calm, positive (gratitude-toned) voice as sadness just because it's quiet-ish", () => {
+      const warmVoice: AcousticFeatures = {
+        rmsEnergy: 2200,
+        zeroCrossingRate: 0.1,
+        pitchHz: 190,
+        pitchVariation: 0.25,
+        speakingRateWPM: 100,
+        pauseDurationMs: 200,
+        pauseCount: 1,
+        durationMs: 4000,
+        energyModulationRate: 0.1,
+        pitchContour: "falling",
+      };
+      const emotion = detectAudioEmotion(warmVoice);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).toBe("gratitude");
+    });
+
+    it("still reaches sadness for a genuinely low energy AND low pitch voice, not just a quiet one", () => {
+      const genuinelySad: AcousticFeatures = {
+        rmsEnergy: 900, // energyNorm ~0.18 — quiet, but the discriminator is pitch too
+        zeroCrossingRate: 0.08,
+        pitchHz: 100, // pitchNorm ~0.09 — genuinely low, not just moderate
+        pitchVariation: 0.1,
+        speakingRateWPM: 70,
+        pauseDurationMs: 400,
+        pauseCount: 2,
+        durationMs: 5000,
+        energyModulationRate: 0.05,
+        pitchContour: "falling",
+      };
+      const emotion = detectAudioEmotion(genuinelySad);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).toBe("sadness");
+    });
+  });
+
   describe("decibels — new loudness feature on AcousticFeatures", () => {
     it("computes a near-0 dBFS value for a loud, high-amplitude tone", () => {
       const loud = generateSteadyPCM(200, 2000, 30000);
