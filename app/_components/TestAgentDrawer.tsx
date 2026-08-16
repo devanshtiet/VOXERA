@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Radio, X, Phone, PhoneOff, Sparkles } from "lucide-react";
+import { Radio, X, Phone, PhoneOff, Sparkles, ChevronDown, Database, ListTree } from "lucide-react";
 import { getMicSupport, describeMicError } from "./micUtils";
 import { useVoiceActivityDetection } from "./useVoiceActivityDetection";
 import {
@@ -15,9 +15,28 @@ const TARGET_SAMPLE_RATE = 16000;
 // ~100ms per WS frame at 16kHz — batches the AudioWorklet's 128-sample
 // (2.7ms) render quanta into chunks actually useful for streaming STT.
 const SEND_CHUNK_SAMPLES = 1600;
-const WS_URL = process.env.NEXT_PUBLIC_REALTIME_WS_URL || "ws://localhost:3001";
+const WS_BASE_URL = process.env.NEXT_PUBLIC_REALTIME_WS_URL || "ws://localhost:3001";
 
 type CallStatus = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
+
+interface Tenant {
+  id: string;
+  name: string;
+  authUserId: string;
+}
+
+interface TurnPolicy {
+  acknowledgeFirst: boolean;
+  pace: string;
+  allowUpsell: boolean;
+  escalate: string;
+  notes: string[];
+}
+
+interface TurnMemory {
+  write?: { tier: string; recordId?: string; merged?: boolean };
+  retrieved?: { mtmIds: string[]; ltmUserIds: string[]; ltmClientIds: string[] };
+}
 
 interface TranscriptTurn {
   id: string;
@@ -26,6 +45,8 @@ interface TranscriptTurn {
   emotion?: string;
   diagnostics?: DiagnosticEmotionResult;
   cai?: { score: number; category: string };
+  policy?: TurnPolicy;
+  memory?: TurnMemory;
 }
 
 function downsampleTo16kMono(input: Float32Array, inputSampleRate: number): Int16Array {
@@ -59,6 +80,10 @@ export function TestAgentDrawer() {
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [interim, setInterim] = useState("");
   const [emotionHistory, setEmotionHistory] = useState<EmotionHistoryPoint[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(""); // "" = demo agent
+  const [activeTenantName, setActiveTenantName] = useState<string | null>(null);
+  const [showReasoning, setShowReasoning] = useState(true);
 
   const wsRef = useRef<WebSocket | null>(null);
   const micAudioContextRef = useRef<AudioContext | null>(null);
@@ -85,6 +110,19 @@ export function TestAgentDrawer() {
   useEffect(() => {
     setMicSupported(getMicSupport());
   }, []);
+
+  // Fetch the list of real configured agents (tenants) once the drawer is
+  // first opened, so "test my own agent" doesn't require reloading the page.
+  // Fails silently to an empty list (falls back to the demo agent) — most
+  // commonly because Supabase isn't reachable in this environment, which
+  // /api/tenants already degrades gracefully for.
+  useEffect(() => {
+    if (!open || tenants.length > 0) return;
+    fetch("/api/tenants")
+      .then((r) => r.json())
+      .then((data: { tenants: Tenant[] }) => setTenants(data.tenants ?? []))
+      .catch(() => {});
+  }, [open, tenants.length]);
 
   // Lets other pages (e.g. the /demo mode switcher's "Live Call" CTA) open
   // this single site-wide drawer instance without prop-drilling or context.
@@ -191,7 +229,13 @@ export function TestAgentDrawer() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const ws = new WebSocket(WS_URL);
+      const selectedTenant = tenants.find((t) => t.id === selectedTenantId);
+      const wsUrl = selectedTenant
+        ? `${WS_BASE_URL}?clientId=${encodeURIComponent(selectedTenant.authUserId)}`
+        : WS_BASE_URL;
+      setActiveTenantName(selectedTenant?.name ?? null);
+
+      const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
@@ -200,7 +244,7 @@ export function TestAgentDrawer() {
       };
 
       ws.onerror = () => {
-        setError(`Couldn't reach the realtime voice server at ${WS_URL}. Make sure it's running: npm run server`);
+        setError(`Couldn't reach the realtime voice server at ${WS_BASE_URL}. Make sure it's running: npm run server`);
         setStatus("error");
         endCall();
       };
@@ -242,6 +286,8 @@ export function TestAgentDrawer() {
                   emotion: emotion?.label,
                   diagnostics,
                   cai: msg.trace?.cai ? { score: msg.trace.cai.score, category: msg.trace.cai.category } : undefined,
+                  policy: msg.trace?.policy,
+                  memory: { write: msg.trace?.memoryWrite, retrieved: msg.trace?.retrieved },
                 },
               ]);
               if (emotion) {
@@ -336,7 +382,7 @@ export function TestAgentDrawer() {
       setStatus("error");
       endCall();
     }
-  }, [endCall, startLevelLoop, vad, bargeIn]);
+  }, [endCall, startLevelLoop, vad, bargeIn, tenants, selectedTenantId]);
 
   const isLive = status !== "idle" && status !== "error";
 
@@ -401,6 +447,35 @@ export function TestAgentDrawer() {
           </button>
         </div>
 
+        {/* Agent selector — pick which configured tenant's actual prompt,
+            knowledge base, and brand-voice memory to test against, instead
+            of always the hardcoded demo agent. Locked once a call starts. */}
+        <div className="flex-none border-b border-[var(--console-border)] px-5 py-2 flex items-center gap-2 text-[11px]">
+          <span className="font-mono uppercase tracking-widest text-[var(--console-text-dim)] flex-none">Testing:</span>
+          {isLive ? (
+            <span className="font-semibold text-[var(--console-text)]">{activeTenantName ?? "Demo agent"}</span>
+          ) : (
+            <div className="relative flex-1 min-w-0 max-w-[280px]">
+              <select
+                value={selectedTenantId}
+                onChange={(e) => setSelectedTenantId(e.target.value)}
+                className="w-full appearance-none bg-[var(--console-surface-raised)] border border-[var(--console-border)] rounded-lg px-2.5 py-1 pr-6 text-[11px] font-semibold text-[var(--console-text)] focus:outline-none focus:border-[var(--console-border-active)]"
+              >
+                <option value="">Demo agent</option>
+                {tenants.map((t) => (
+                  <option key={t.id} value={t.id} className="bg-[var(--console-surface)] text-[var(--console-text)]">
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--console-text-dim)]" />
+            </div>
+          )}
+          {tenants.length === 0 && (
+            <span className="text-[var(--console-text-dim)]">(no configured agents found — testing the demo agent)</span>
+          )}
+        </div>
+
         {/* Split body: analytics update on the left the instant new data
             arrives, conversation keeps flowing independently on the right —
             neither one waits on or pushes around the other. */}
@@ -426,6 +501,62 @@ export function TestAgentDrawer() {
                 </div>
               )}
             </div>
+
+            {(latestAssistantTurn?.policy || latestAssistantTurn?.memory) && (
+              <div>
+                <button
+                  onClick={() => setShowReasoning((s) => !s)}
+                  className="w-full flex items-center justify-between voxera-console-label text-[9px] mb-1.5"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <ListTree className="w-3 h-3" /> Source of Truth — why this reply
+                  </span>
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showReasoning ? "rotate-180" : ""}`} />
+                </button>
+                {showReasoning && (
+                  <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-surface)] p-3 flex flex-col gap-3 text-[11px]">
+                    {latestAssistantTurn.policy && (
+                      <div>
+                        <div className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] mb-1">Policy applied</div>
+                        <div className="text-[var(--console-text)]">
+                          Pace: <span className="font-semibold capitalize">{latestAssistantTurn.policy.pace}</span>
+                          {latestAssistantTurn.policy.acknowledgeFirst && " · acknowledge-first"}
+                          {!latestAssistantTurn.policy.allowUpsell && " · no upsell"}
+                          {latestAssistantTurn.policy.escalate !== "none" && (
+                            <span className="text-amber-400"> · escalate: {latestAssistantTurn.policy.escalate}</span>
+                          )}
+                        </div>
+                        {latestAssistantTurn.policy.notes.length > 0 && (
+                          <ul className="mt-1 list-disc list-inside text-[var(--console-text-dim)]">
+                            {latestAssistantTurn.policy.notes.map((n, i) => <li key={i}>{n}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                    {latestAssistantTurn.memory && (
+                      <div>
+                        <div className="text-[9px] font-mono uppercase tracking-widest text-[var(--console-text-dim)] mb-1 flex items-center gap-1.5">
+                          <Database className="w-3 h-3" /> Memory
+                        </div>
+                        {latestAssistantTurn.memory.write && (
+                          <div className="text-[var(--console-text)]">
+                            Wrote to <span className="font-semibold">{latestAssistantTurn.memory.write.tier}</span>
+                            {latestAssistantTurn.memory.write.merged && " (merged with existing memory)"}
+                          </div>
+                        )}
+                        {latestAssistantTurn.memory.retrieved && (
+                          <div className="text-[var(--console-text-dim)] mt-0.5">
+                            Retrieved {latestAssistantTurn.memory.retrieved.mtmIds.length} recent +{" "}
+                            {latestAssistantTurn.memory.retrieved.ltmUserIds.length} long-term-user +{" "}
+                            {latestAssistantTurn.memory.retrieved.ltmClientIds.length} client memories for this reply
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
