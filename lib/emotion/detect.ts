@@ -25,18 +25,53 @@ export function detectTextEmotionLexicon(text: string): EmotionSignal & { matche
   let hasNegMatch = false;
   let hasPosMatch = false;
 
+  // A negation cue ("not", "n't", "never", "no", "hardly", "barely") in the
+  // ~20 chars right before a match flips the read entirely — the lexicon had
+  // no negation handling at all, so "I'm not feeling good" matched the
+  // "good" keyword and scored as pure JOY. Flip positive labels to their
+  // negative counterpart on negation; drop negated negative-label matches
+  // ("not angry") rather than guess a specific replacement label.
+  const NEGATION_RE = /\b(?:not|n't|never|no|hardly|barely)\s+(?:\w+\s+){0,2}$/i;
+  const POS_TO_NEG: Partial<Record<EmotionLabel, EmotionLabel>> = {
+    joy: "sadness",
+    gratitude: "disappointment",
+    excitement: "disappointment",
+  };
+
   for (const entry of LEXICON) {
-    const matches = text.match(entry.kw);
-    if (!matches) continue;
-    const w = entry.w * matches.length;
-    labelScores[entry.label] = (labelScores[entry.label] ?? 0) + w;
-    vadAcc.v += entry.vad.v * w;
-    vadAcc.a += entry.vad.a * w;
-    vadAcc.d += entry.vad.d * w;
-    totalW += w;
-    matchedKeywords.push(...matches);
-    if (negLabels.has(entry.label)) hasNegMatch = true;
-    if (posLabels.has(entry.label)) hasPosMatch = true;
+    const flags = entry.kw.flags.includes("g") ? entry.kw.flags : entry.kw.flags + "g";
+    const re = new RegExp(entry.kw.source, flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const preceding = text.slice(Math.max(0, m.index - 20), m.index);
+      const negated = NEGATION_RE.test(preceding);
+
+      let label = entry.label;
+      let vad = entry.vad;
+      if (negated) {
+        const flipped = POS_TO_NEG[label];
+        if (flipped) {
+          label = flipped;
+          vad = { v: -vad.v, a: vad.a, d: -Math.abs(vad.d) };
+        } else {
+          // Negating an already-negative word ("not angry") — no confident
+          // replacement label, so just skip this match instead of guessing.
+          if (re.lastIndex === m.index) re.lastIndex++;
+          continue;
+        }
+      }
+
+      const w = entry.w;
+      labelScores[label] = (labelScores[label] ?? 0) + w;
+      vadAcc.v += vad.v * w;
+      vadAcc.a += vad.a * w;
+      vadAcc.d += vad.d * w;
+      totalW += w;
+      matchedKeywords.push(m[0]);
+      if (negLabels.has(label)) hasNegMatch = true;
+      if (posLabels.has(label)) hasPosMatch = true;
+      if (re.lastIndex === m.index) re.lastIndex++;
+    }
   }
 
   // Context-aware punctuation: !! and ??? boost arousal in the direction
@@ -206,6 +241,37 @@ export async function detectTextEmotionLocal(text: string): Promise<EmotionSigna
   };
 }
 
+// ─── Small-talk guard ────────────────────────────────────────────────────────
+
+/**
+ * Both HF and the lexicon can misfire on short, content-free utterances —
+ * e.g. HF has labeled a bare "How are you?" as confusion, which then forces
+ * the confusion persona's "confirm understanding" language onto a reply to a
+ * simple greeting. Guards ONLY against the whole utterance being one of these
+ * near-universally neutral small-talk phrases (not merely containing one),
+ * so genuine distress phrased as a question — "How am I supposed to deal
+ * with this?" — is untouched.
+ */
+const SMALL_TALK_RE =
+  /^(hi|hello|hey|yo|good\s*(morning|afternoon|evening))[.,!?\s]*$|^how(?:'s|s| is| are)\s+(you|it going|things|your day)\??$|^what'?s up\??$|^how'?s it going\??$/i;
+
+function isSmallTalkGreeting(text: string): boolean {
+  return SMALL_TALK_RE.test(text.trim());
+}
+
+function neutralSignal(): EmotionSignal {
+  return {
+    label: "neutral",
+    intensity: 0,
+    confidence: 0.9,
+    confidenceCategory: classifyConfidence(0.9),
+    vad: { v: 0, a: 0, d: 0 },
+    source: "text",
+    at: Date.now(),
+    isMixed: false,
+  };
+}
+
 // ─── Concurrent Universal Router ────────────────────────────────────────────
 
 /**
@@ -247,6 +313,19 @@ export async function detectTextEmotion(text: string): Promise<TextEmotionResult
   ]);
 
   const hfResult = hfSettled;
+
+  // Small-talk guard: overrides both engines when the whole utterance is a
+  // bare greeting/small-talk phrase and the lexicon found no real keyword
+  // hit — cheap ML models routinely mislabel these ("How are you?" → confusion).
+  if (isSmallTalkGreeting(text) && lexiconResult.confidence <= 0.5) {
+    const neutral = neutralSignal();
+    return {
+      primary: neutral,
+      lexicon: lexiconResult,
+      hf: hfResult,
+      selection: { engine: "lexicon", reason: "Small-talk guard: bare greeting, forced neutral" },
+    };
+  }
 
   // Selection logic: HF wins if it returned a valid signal within budget
   if (hfResult.signal && !hfResult.timedOut) {

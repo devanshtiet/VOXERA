@@ -74,10 +74,19 @@ export function guardOutput(args: {
     reply = `I don't have reliable information on that yet, so I want to avoid guessing. ${reply}`;
   }
 
-  // 5) Escalation mention required.
+  // 5) Escalation mention required. Recognizes natural hand-off phrasing
+  // ("grab someone from the team", "loop in a teammate") in addition to the
+  // literal words, so a reply that already offered a hand-off naturally
+  // doesn't get a second, robotic sentence bolted on top of it. The
+  // fallback sentence itself is phrased the way a person would say it out
+  // loud, matching the persona/policy prompts — never "specialist".
   if (args.policy.escalate !== "none") {
-    if (!/(connect|transfer|specialist|supervisor|human)/i.test(reply)) {
-      reply += ` Let me connect you with a ${args.policy.escalate === "human" ? "human specialist" : "senior specialist"} now.`;
+    const alreadyMentionsHandoff =
+      /(connect|transfer|supervisor|human|someone from the team|teammate|grab someone|loop (?:in|you in)|bring (?:in|someone))/i.test(
+        reply
+      );
+    if (!alreadyMentionsHandoff) {
+      reply += " Let me grab someone from the team to help with this.";
       reasons.push("appended escalation sentence (policy)");
     }
   }

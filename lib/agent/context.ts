@@ -5,6 +5,10 @@ import { getEmotionPersona, formatPersonaBlock } from "../emotion/persona";
 // Character-based budget approximation. Assumes ~4 chars/token.
 const BUDGET_CHARS = 24000;
 
+// Matches natural hand-off phrasing so we can tell the model "you already
+// offered this" instead of letting it repeat the offer verbatim every turn.
+const HANDOFF_OFFER_RE = /\b(someone|somebody)\s+from\s+the\s+team\b|\bgrab\s+someone\b|\bteammate\s+to\s+jump\s+in\b|\bconnect\s+you\s+with\b/i;
+
 export interface LLMContext {
   system: string;
   user: string;
@@ -38,7 +42,10 @@ export function buildLLMContext(args: {
     : truncate(formatEvidence(retrieved.mtm), 6000);
 
   const emotionBlock = formatEmotion(emotion);
-  const policyBlock = policyToPrompt(policy);
+  const alreadyOfferedHandoff = retrieved.stm.some(
+    (t) => t.role === "agent" && HANDOFF_OFFER_RE.test(t.text)
+  );
+  const policyBlock = policyToPrompt(policy, alreadyOfferedHandoff);
   const stmBlock = truncate(formatStm(retrieved.stm, userTurn.id), 8000);
 
   // FR-11: Build dynamic emotion persona for this turn

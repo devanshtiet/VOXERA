@@ -149,11 +149,13 @@ const PERSONA_MAP: Record<EmotionLabel, EmotionPersona> = {
   confusion: {
     tone: "Clear, simple, patient. One step at a time.",
     openingStyle:
-      "Ask one focused question or explain one thing. Confirm understanding before moving on.",
+      "Answer what they actually asked, plainly. Only slow down and break things into steps if you're " +
+      "genuinely explaining something multi-part — a one-line answer to a one-line question stays one line.",
     languageRules: [
       "One idea per sentence — never compound sentences.",
       "Use plain English — no technical terms.",
-      "After explaining, confirm: 'Does that make sense?'",
+      "Only ask 'Does that make sense?' (or similar) if you just walked through an actual multi-step " +
+        "explanation this turn — never tack it onto a short factual answer or casual reply.",
       "Keep total response to 2 sentences maximum.",
     ],
     forbidden: [
