@@ -165,6 +165,7 @@ function inferLabelScored(
 ): { label: EmotionLabel; patternStrength: number; signalHint?: "crying" | "laughing" } {
   const scores: Record<EmotionLabel, number> = {
     neutral: 0,
+    calm: 0,
     anger: 0,
     frustration: 0,
     sadness: 0,
@@ -256,6 +257,20 @@ function inferLabelScored(
   if (f.pitchVariation > 0.15 && f.pitchVariation < 0.4 && f.energyMod < 0.3 && f.pauseRatio < 0.2) scores.gratitude += 0.2;
   if ((f.contour === "falling" || f.contour === "flat") && f.zcr < 0.2 && f.pauseRatio < 0.2) scores.gratitude += 0.15;
   if (f.vad.v > 0.05 && f.energyMod < 0.25 && f.pauseRatio < 0.2) scores.gratitude += 0.15;
+
+  // ── Calm: a genuine, actively-competing bucket for steady, unhurried,
+  // low-arousal speech that isn't negative — the counterpart to the sadness
+  // rules above. Before this, calm speech only avoided sadness (once the
+  // sadness-bias fix required energy AND pitch both low) and fell through to
+  // "neutral" by default rather than being positively recognized as its own
+  // state. Deliberately does NOT require low pitch (that's sadness's
+  // discriminator) — calm speech can be any comfortable pitch, what matters
+  // is steadiness (low variation, low energy modulation) and an unhurried,
+  // fluent pace (low pause ratio, not halting like confusion).
+  if (f.energy > 0.15 && f.energy < 0.55 && f.pitchVariation < 0.25 && f.energyMod < 0.25) scores.calm += 0.3;
+  if (f.pauseRatio < 0.15 && f.rate > 0.25 && f.rate < 0.6) scores.calm += 0.2;
+  if ((f.contour === "flat" || f.contour === "falling") && f.zcr < 0.25) scores.calm += 0.15;
+  if (f.vad.a < -0.2 && f.vad.v > -0.15) scores.calm += 0.15;
 
   // ── Neutral: low variation, moderate everything, no strong signals
   if (f.pitchVariation < 0.15 && f.vad.a < 0) scores.neutral += 0.3;

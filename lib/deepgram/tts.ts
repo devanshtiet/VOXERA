@@ -4,6 +4,22 @@ import { getDeepgram } from "./client";
 import { supabase } from "../db/supabase";
 import { synthesizeElevenLabs } from "../tts/voice-clone";
 import { applyEmotionProsody, getEmotionTTSParams } from "../emotion/tts-params";
+import { isDeepgramModelId } from "./voices";
+
+/**
+ * Resolves a `persona` string to a Deepgram TTS model id. Accepts either
+ * one of the 4 legacy curated keys (CONFIG.deepgram.voicePersonas, e.g.
+ * "female-friendly") for backward compatibility, or a full Deepgram model
+ * id directly (e.g. "aura-2-luna-en") as saved by the Agent Builder voice
+ * picker — which covers the full ~50-voice catalog without needing a
+ * migration or an expanded config map.
+ */
+function resolveVoiceModel(persona?: string): string {
+  if (!persona) return CONFIG.deepgram.ttsModel;
+  if (isDeepgramModelId(persona)) return persona;
+  const personaConfig = CONFIG.deepgram.voicePersonas[persona as keyof typeof CONFIG.deepgram.voicePersonas];
+  return personaConfig?.model || CONFIG.deepgram.ttsModel;
+}
 
 // Resolve voice settings for client
 async function getClientVoiceSettings(clientId?: string): Promise<{ provider?: string; voiceId?: string } | null> {
@@ -59,8 +75,7 @@ export async function synthesize(text: string, opts?: {
     shaped = applyProsody(shaped, opts.policy);
   }
 
-  const personaConfig = opts?.persona ? CONFIG.deepgram.voicePersonas[opts.persona as keyof typeof CONFIG.deepgram.voicePersonas] : undefined;
-  const model = personaConfig?.model || CONFIG.deepgram.ttsModel;
+  const model = resolveVoiceModel(opts?.persona);
 
   const MAX_TTS_RETRIES = 2;
   let lastErr: unknown;
@@ -113,8 +128,7 @@ export async function synthesizeLinear16(text: string, opts?: {
     shaped = applyProsody(shaped, opts.policy);
   }
 
-  const personaConfig = opts?.persona ? CONFIG.deepgram.voicePersonas[opts.persona as keyof typeof CONFIG.deepgram.voicePersonas] : undefined;
-  const model = personaConfig?.model || CONFIG.deepgram.ttsModel;
+  const model = resolveVoiceModel(opts?.persona);
 
   const binary = await dg.speak.v1.audio.generate({
     text: shaped,

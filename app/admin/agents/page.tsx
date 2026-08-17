@@ -16,9 +16,11 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { CreateAgentDialog } from "./CreateAgentDialog";
-import { BLANK_DRAFT, VOICE_PERSONAS, type Agent, type Draft, type GeneratedAgentDraft } from "./types";
+import { BLANK_DRAFT, type Agent, type Draft, type GeneratedAgentDraft } from "./types";
+import { VoicePicker } from "./VoicePicker";
+import { KnowledgeTab } from "./KnowledgeTab";
 
-type Tab = "persona" | "prompt";
+type Tab = "persona" | "prompt" | "knowledge";
 type PromptMode = "manual" | "ai";
 
 const AVATAR_COLORS = [
@@ -343,7 +345,7 @@ export default function AgentBuilderPage() {
 
               {/* Tabs */}
               <div className="flex items-center gap-1 px-6 pt-3 border-b border-[var(--color-border-subtle)]">
-                {(["persona", "prompt"] as Tab[]).map((t) => (
+                {(["persona", "prompt", "knowledge"] as Tab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -353,7 +355,7 @@ export default function AgentBuilderPage() {
                         : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                     }`}
                   >
-                    {t === "persona" ? "Persona" : "Prompt"}
+                    {t === "persona" ? "Persona" : t === "prompt" ? "Prompt" : "Knowledge"}
                   </button>
                 ))}
               </div>
@@ -391,24 +393,19 @@ export default function AgentBuilderPage() {
                       <label className="block text-[12px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">
                         Voice
                       </label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {VOICE_PERSONAS.map((v) => (
-                          <button
-                            key={v.id}
-                            type="button"
-                            onClick={() => setDraft((d) => ({ ...d, voice_persona: v.id }))}
-                            className={`px-3 py-2.5 rounded-xl border text-[12.5px] font-semibold transition-all ${
-                              draft.voice_persona === v.id
-                                ? "border-[var(--color-border-active)] bg-[var(--color-bg-base)] text-[var(--color-text-primary)] shadow-[0_0_10px_var(--color-accent-glow)]"
-                                : "border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]"
-                            }`}
-                          >
-                            {v.label}
-                          </button>
-                        ))}
-                      </div>
+                      <p className="text-[12px] text-[var(--color-text-muted)] mb-2.5">
+                        Deepgram Aura-2 — search by name, trait, or accent, and preview before you pick.
+                      </p>
+                      <VoicePicker
+                        value={draft.voice_persona}
+                        onChange={(id) => setDraft((d) => ({ ...d, voice_persona: id }))}
+                      />
                     </div>
                   </>
+                )}
+
+                {tab === "knowledge" && (
+                  <KnowledgeTab />
                 )}
 
                 {tab === "prompt" && (

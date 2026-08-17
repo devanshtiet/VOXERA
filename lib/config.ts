@@ -92,8 +92,15 @@ export const CONFIG = {
   knowledge: {
     chunkSize: 500,
     chunkOverlap: 100,
-    maxFileSizeBytes: 5 * 1024 * 1024,
-    allowedMimeTypes: ["text/plain", "application/pdf"] as string[],
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    allowedMimeTypes: [
+      "text/plain",
+      "application/pdf",
+      "text/markdown",
+      "text/csv",
+      "application/json",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+    ] as string[],
   },
   telephony: {
     // FR-19: Max concurrent calls before queue/reject logic kicks in
@@ -103,10 +110,18 @@ export const CONFIG = {
     encoding: "mulaw" as const,
     // Issue #14: Energy threshold for barge-in detection (16-bit PCM RMS).
     // Only trigger TTS interruption when caller audio exceeds this level.
-    // Prevents false barge-ins from background noise.
-    bargeInEnergyThreshold: 500,
-    // Issue #14: Silence threshold for pause detection in acoustic analysis.
-    silenceEnergyThreshold: 200,
+    // Prevents false barge-ins from background noise. Was 500 — live testing
+    // showed room static/AC hum on some lines registering enough RMS to
+    // falsely trigger; raised to reduce that without requiring a shout to
+    // interrupt (typical speech RMS is 1000-6000+, see the energyNorm
+    // normalization in lib/emotion/audio-emotion.ts).
+    bargeInEnergyThreshold: 800,
+    // Issue #14: Silence threshold for pause detection in acoustic analysis
+    // (lib/audio/acoustic.ts's detectPauses()). Was 200 and, until now, only
+    // duplicated by a hardcoded local constant in acoustic.ts rather than
+    // actually read from here — raised modestly to treat more low-level
+    // background noise as silence, still well below genuine speech energy.
+    silenceEnergyThreshold: 300,
   },
   emotion: {
     /**

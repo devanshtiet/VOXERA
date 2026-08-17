@@ -1149,3 +1149,169 @@ working either.
 - Live-verified through the actual `generateReply()` pipeline with ZenMux disabled to force the Groq
   path specifically: `[LLM] Success via provider: groq`, `model: openai/gpt-oss-120b`, real generated
   reply text
+
+### 2026-08-17 — Agent Builder: Real Voice Picker, Wider Knowledge Formats, and a Critical DB Schema Bug
+
+**Objective**: Requested three things off a screenshot of the Agent Builder Persona tab: (1) a proper
+file-upload → parse → chunk → vector-DB pipeline usable during calls, not just TXT/PDF; (2) a real,
+searchable, previewable voice-provider picker instead of 4 generic buttons, matching what Deepgram
+actually offers; (3) general UI polish on the page.
+
+**Voice Picker**: Fetched Deepgram's live `/v1/models` catalog with the real API key — 40 current-gen
+Aura-2 voices (plus 12 legacy Aura-1), each with real accent and personality-tag metadata — and
+captured it as a static catalog (`lib/deepgram/voices.ts`). `lib/deepgram/tts.ts`'s `synthesize()`/
+`synthesizeLinear16()` previously resolved `persona` only against the 4 hardcoded
+`CONFIG.deepgram.voicePersonas` keys; added `resolveVoiceModel()`, which treats any `aura-`-prefixed
+string as a direct Deepgram model id and only falls back to the legacy key map otherwise — so the
+existing `agents.voice_persona` TEXT column can hold either a legacy key or a full model id with zero
+migration and full backward compatibility. New `VoicePicker.tsx` component replaces the 4-button grid
+with search (name/trait/accent) + gender/accent filters + a play-to-preview button per voice (calls
+the existing `/api/tts` route, which already accepted a raw `persona` string).
+
+**Knowledge Formats**: `CONFIG.knowledge.allowedMimeTypes` expanded from `text/plain`/`application/pdf`
+only to also include Markdown, CSV, JSON, and DOCX (`mammoth` added as a dependency for DOCX text
+extraction, mirroring the existing `pdf-parse` pattern). `/api/knowledge/upload` now also falls back to
+an extension-based MIME guess when the browser reports a generic/empty type (common for `.md`/`.csv`).
+New `KnowledgeTab.tsx` inside Agent Builder lets an account upload, watch processing status, and delete
+knowledge documents inline in the agent editor, reusing the existing `/api/knowledge/upload` and
+`/api/knowledge/documents` routes rather than duplicating them — links out to the fuller standalone
+`/admin/knowledge` manager for search/pagination. Knowledge remains shared per-account rather than
+scoped per-agent, an already-tracked gap (`VOXERA_ROADMAP.md` §4.6) intentionally left alone here.
+
+**Critical finding while live-testing knowledge ingestion**: a markdown-file ingest through the real
+`ingestDocument()` pipeline against the live Supabase project logged `[VectorStore] Put Error: Could
+not find the 'emotion' column of 'memories' in the schema cache` — but `ingestDocument()` still
+reported success (`status: "ready"`, a plausible `chunkCount`), because `vectorStore.put()`
+(`lib/memory/store.ts`) only `console.error`s a Postgres error, it never throws or bubbles it up.
+Root-caused via a live `select *` against the production `memories` table: it's still running the
+original `migration.sql` schema (`id, tier, userId, clientId, text, embedding, metadata, createdAt,
+documentId, importance_score, retrieval_count, last_retrieved_at`), missing 14 columns that
+`sql/migration_consolidated.sql`'s intended schema and every write in `lib/memory/store.ts`'s `toRow()`
+assume exist (`emotion`, `vad_v/a/d`, `topic`, `ts`, `summary`, `entities`, `importance`,
+`sourceUtteranceIds`, `recurrence`, `resolved`, `ttl`). The reason: `migration_consolidated.sql` uses
+`CREATE TABLE IF NOT EXISTS`, which is a full no-op against a DB where `memories` already exists — and
+its patch section (a set of `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements meant to backfill
+exactly this situation) only covered 4 of the 14 missing columns. This means every memory write and
+every knowledge-base chunk write has been silently failing in production this whole time, independent
+of anything in this session's other work — the emotion-memory system and RAG retrieval have both been
+running against effectively empty tables.
+
+**Fix**: `sql/migration_consolidated.sql`'s patch section now includes all 14 missing columns as
+`ADD COLUMN IF NOT EXISTS` statements (additive-only, safe to re-run, verified syntactically valid via
+`pglast`). This sandbox has no direct Postgres connection string by default (`.env.local` only has the
+Supabase REST URL + keys, and PostgREST can't execute DDL), so asked the user for permission before
+touching production — they approved, then supplied a direct connection string. The direct-connection
+host (`db.<ref>.supabase.co`) turned out to be IPv6-only and didn't resolve from this sandbox
+(`getaddrinfo ENOTFOUND`); switched to the Supavisor **transaction pooler** connection string instead
+(`postgres.<ref>@aws-<region>.pooler.supabase.com:6543`, dual-stack, works over IPv4). Installed `pg`
+locally (`npm install --no-save pg @types/pg` — not added to `package.json`, one-off tooling only) and
+ran the patch directly against production via a temporary script: read `information_schema.columns`
+before and after to confirm all 14 columns landed, then re-ran a full `ingestDocument()` →
+`queryKnowledgeBase()` round trip against production to confirm the write no longer errors and the
+chunk is actually retrievable — it wasn't, before this fix; it is now. Cleaned up the test rows/
+documents afterward and deleted the temporary scripts. `VOXERA_ROADMAP.md` §0 updated from "Action
+Required" to "Resolved".
+
+**Files Modified**: `lib/deepgram/voices.ts` (new), `lib/deepgram/tts.ts`, `app/admin/agents/VoicePicker.tsx`
+(new), `app/admin/agents/KnowledgeTab.tsx` (new), `app/admin/agents/page.tsx`, `lib/config.ts`,
+`lib/knowledge/ingest.ts`, `app/api/knowledge/upload/route.ts`, `sql/migration_consolidated.sql`,
+`package.json` (added `mammoth`)
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (305 passing), `npm run build` — all clean
+- Live-verified `resolveVoiceModel()` against the real Deepgram API: a brand-new Aura-2 voice id
+  (`aura-2-luna-en`, never previously wired) synthesized real audio bytes; a legacy key
+  (`male-formal`) still resolves correctly too, confirming backward compatibility
+- Live-verified `ingestDocument()` end-to-end against the real Supabase project with a `text/markdown`
+  file — confirmed the extraction/chunking path works correctly; this is also what surfaced the schema
+  bug above (chunking/embedding succeeded, the final DB write did not)
+- Could not click through the new Voice/Knowledge tabs live in-browser in this pass — recommend a
+  manual pass in a running dev server, especially the preview-playback button and drag-and-drop upload
+
+### 2026-08-17 — Emotion Engine Sprint: VAD Calibration, Calm Bucket, Weighted Fusion, Dashboard Split
+
+**Objective**: User supplied 4 sprint tickets (VAD/interruption tuning, acoustic sadness bias,
+dashboard/fusion refactor, plus an already-fixed Groq 404 ticket). Before implementing, audited each
+against the actual codebase — tickets 1–3 turned out to describe work already partly or fully shipped
+in earlier sessions, which would have misled whoever picked them up if implemented as literally
+written. Confirmed with the user to reword + implement rather than build from a stale premise.
+
+**Ticket 1 (Groq 404) — closed, not reopened.** Already fixed and live-verified in an earlier entry
+this file (`llama-3.3-70b-versatile` → `openai/gpt-oss-120b`, env-overridable via `GROQ_MODEL`).
+
+**Ticket 2 (VAD interruption + noise floor) — real follow-up tuning, not a from-scratch fix.** The
+cut-off-mid-sentence bug was already fixed (`endpointing: "500"` from an earlier session). Bumped
+further to `"900"` (`lib/deepgram/live.ts`) per the ticket's 800–1000ms target — live testing had
+still shown occasional cut-offs on longer natural pauses. `CONFIG.telephony.bargeInEnergyThreshold`
+raised 500→800 (reduces false barge-in triggers from background noise/AC hum while still triggering
+on genuine speech, which typically registers 1000-6000+ RMS). Also found and fixed a real, separate
+bug while investigating: `CONFIG.telephony.silenceEnergyThreshold` (the "noise floor" the ticket
+asked to recalibrate) was completely dead — `lib/audio/acoustic.ts`'s pause detector had its own
+hardcoded local `PAUSE_ENERGY_THRESHOLD = 200` duplicating it, so changing the config value would
+have silently done nothing. Now `acoustic.ts` reads directly from `CONFIG.telephony
+.silenceEnergyThreshold` (raised 200→300).
+
+**Ticket 3 (acoustic sadness bias) — the sadness-bias fix itself was already shipped**
+(`lib/emotion/audio-emotion.ts`, requires energy AND pitch both low, not any one signal alone). What
+was genuinely missing, and what the ticket's "clean alternative Calm baseline bucket" ask reduces to:
+calm speech had no positive scoring rule of its own, so it only ever reached "neutral" as a fallback
+default rather than being actively recognized. Added `"calm"` as a new `EmotionLabel` value
+(`lib/types.ts`) with real competing acoustic scoring rules — steady/low pitch variation, low energy
+modulation, unhurried fluent pace (low pause ratio), deliberately NOT requiring low pitch (that stays
+sadness's discriminator) — plus entries in every other `Record<EmotionLabel, X>` map the type change
+touched: `lib/emotion/persona.ts` (a real coaching persona — relaxed, unhurried, no forced
+enthusiasm), `lib/emotion/tts-params.ts`, `lib/emotion/emotion-label-map.ts`'s `HF_VAD_MAP`,
+`lib/emotion/detect.ts`'s `syntheticVadMap`, and `EMOTION_COLOR` in `EngineDashboard.tsx`. TypeScript's
+exhaustiveness checking on these `Record<EmotionLabel, X>` types caught every site that needed an
+entry — none were found by manual grep alone.
+
+**Ticket 4 (dashboard + fusion) — the only ticket describing genuinely unbuilt work end to end.**
+- **Weighted multi-class fusion**: `lib/emotion/detect.ts`'s `fuseEmotion()` previously blended
+  text/audio VAD in raw-confidence proportion and picked the label via a flat confidence-margin check
+  — no explicit priority between the two signal types. Added the requested weighting: text-heavy
+  70/30 when `text.confidence > 0.7`, acoustic-heavy 40/60 otherwise, applied to both the VAD blend
+  and the (still margin-gated) label selection, so the priority actually changes outcomes rather than
+  just being cosmetic. Two new tests pin real behavior flips versus the old logic — one where a
+  confident text read now wins despite lower raw confidence than audio, one where a vague text read
+  now loses to a mildly-more-confident acoustic read.
+- **Dashboard split**: `EngineDashboard.tsx`'s `EngineDiagnosticPanel` previously rendered all 4
+  engines (HF/Lexicon/Local ONNX/Acoustic) in one undivided 4-column grid. Split into a "Text Engine
+  Division" (HF/Lexicon/Local ONNX, 3-column) and a separate "Acoustic Engine Division" section below
+  it, each with its own label.
+- **Acoustic metrics exposure**: the Acoustic engine card previously only showed the mapped label —
+  no raw feature values. Added a `rawMetrics` field (pitch Hz, RMS energy/dB, ZCR, speaking rate WPM)
+  to the `EngineDiagnostic` type in both `lib/emotion/emotion-debug.ts` and its UI-side mirror in
+  `EngineDashboard.tsx`, populated in `runDiagnosticEmotion()` directly from the already-available
+  `AcousticFeatures` param, and rendered as a 4-metric readout row on the new dedicated
+  `AcousticEngineCard` component.
+- Did **not** implement the ticket's "Local ONNX as primary active engine" framing as literally
+  described — checked the actual production selection logic (`detectTextEmotion()` in `detect.ts`)
+  and Local ONNX is diagnostic-only, never selected as primary; production picks HF-if-available-
+  else-Lexicon. The dashboard's existing "X selected" callout already accurately reflects this real
+  behavior — building the ticket's framing as written would have made the UI lie about which engine
+  actually produced the live result.
+
+**Files Modified**: `lib/deepgram/live.ts`, `lib/config.ts`, `lib/audio/acoustic.ts`, `lib/types.ts`,
+`lib/emotion/audio-emotion.ts`, `lib/emotion/persona.ts`, `lib/emotion/tts-params.ts`,
+`lib/emotion/emotion-label-map.ts`, `lib/emotion/detect.ts`, `lib/emotion/emotion-debug.ts`,
+`app/_components/EngineDashboard.tsx`, `__tests__/emotion/acoustic-scored-inference.test.ts`,
+`__tests__/emotion/detect.test.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (308 passing, 3 new), `npm run build` — all clean
+- TypeScript's exhaustive `Record<EmotionLabel, X>` checking caught all 5 sites needing a `calm` entry
+  after the type change — used as the actual completeness check, not manual grep
+- New regression test (`acoustic-scored-inference.test.ts`) proves `calm` is reachable as a real
+  winner, not just an absence of sadness — passed on the first run, confirming the hand-computed
+  scoring math was right before running it
+- Two new fusion tests (`detect.test.ts`) each construct a case where the OLD raw-confidence-margin
+  logic would pick one label and the NEW weighted logic picks the other — both pass, proving the
+  priority weighting is load-bearing, not cosmetic
+- Live end-to-end verification via a standalone script (`runDiagnosticEmotion()` with synthetic
+  `AcousticFeatures` matching the new test fixture): confirmed `label: "calm"` and `rawMetrics` with
+  all 5 fields populated correctly
+- Live browser verification against the running dev server's public `/demo` page: sent a real text
+  turn ("I guess it's fine, whatever"), screenshotted the result — "TEXT ENGINE DIVISION" and
+  "ACOUSTIC ENGINE DIVISION" both render as separate labeled sections with real data, HF correctly
+  shows its genuine "unavailable (no token or error)" state, fusion callout correctly shows "LEXICON
+  SELECTED"

@@ -190,6 +190,7 @@ export async function detectTextEmotionLocal(text: string): Promise<EmotionSigna
 
   // Synthetic VAD map for when ML overrides the Lexicon
   const syntheticVadMap: Record<EmotionLabel, VAD> = {
+    calm: { v: 0.15, a: -0.5, d: 0.1 },
     anger: { v: -0.8, a: 0.8, d: 0.5 },
     frustration: { v: -0.6, a: 0.4, d: 0.2 },
     sadness: { v: -0.7, a: -0.4, d: -0.3 },
@@ -367,6 +368,14 @@ export async function detectTextEmotion(text: string): Promise<TextEmotionResult
  *   confidence than loser, otherwise text wins (tie-breaking toward semantic)
  * - Preserves isMixed flag from text signal
  * - Attaches individual signals for diagnostics
+ * - Multi-class weighted fusion (Ticket 4): text and audio aren't blended in
+ *   raw-confidence proportion alone — a fixed priority weight is applied on
+ *   top, text-heavy (70/30) when text is confident and specific, acoustic-
+ *   heavy (40/60) when text is vague/low-confidence (e.g. a flat "okay" said
+ *   in a shaky, high-arousal voice — the tone carries more signal than the
+ *   word there). Both the VAD blend and the label-selection margin check use
+ *   these weighted confidences, so the priority actually changes outcomes,
+ *   not just the reported number.
  */
 export function fuseEmotion(
   text: EmotionSignal,
@@ -375,17 +384,6 @@ export function fuseEmotion(
   if (!audio) {
     return { ...text, source: "fused", textSignal: text, audioSignal: null };
   }
-
-  const wa = audio.confidence;
-  const wt = text.confidence;
-  const sum = wa + wt || 1;
-
-  // Confidence-weighted VAD blending
-  const vad: VAD = {
-    v: (audio.vad.v * wa + text.vad.v * wt) / sum,
-    a: (audio.vad.a * wa + text.vad.a * wt) / sum,
-    d: (audio.vad.d * wa + text.vad.d * wt) / sum,
-  };
 
   const { fusionConfidenceMargin, fusionMinConfidence } = CONFIG.emotion;
 
@@ -404,11 +402,29 @@ export function fuseEmotion(
     };
   }
 
-  // Label selection: require a meaningful confidence margin to override
+  // Text-heavy 70/30 when text is confident and specific (>0.7); otherwise
+  // acoustic-heavy 40/60 — text is vague/conversational, so acoustic tone
+  // is given more say than its raw confidence alone would earn it.
+  const textWeight = text.confidence > 0.7 ? 0.7 : 0.4;
+  const audioWeight = 1 - textWeight;
+
+  // Weighted VAD blending
+  const vad: VAD = {
+    v: audio.vad.v * audioWeight + text.vad.v * textWeight,
+    a: audio.vad.a * audioWeight + text.vad.a * textWeight,
+    d: audio.vad.d * audioWeight + text.vad.d * textWeight,
+  };
+
+  // Label selection: apply the same priority weight to each engine's
+  // confidence, then require the usual margin to override — so a low-
+  // confidence text read doesn't get to override a strong acoustic signal
+  // just by having a numerically higher raw confidence.
+  const weightedText = text.confidence * textWeight;
+  const weightedAudio = audio.confidence * audioWeight;
   let label: EmotionLabel;
-  if (audio.confidence > text.confidence + fusionConfidenceMargin) {
+  if (weightedAudio > weightedText + fusionConfidenceMargin) {
     label = audio.label;
-  } else if (text.confidence > audio.confidence + fusionConfidenceMargin) {
+  } else if (weightedText > weightedAudio + fusionConfidenceMargin) {
     label = text.label;
   } else {
     // Within margin: prefer text (semantic meaning is generally more reliable)

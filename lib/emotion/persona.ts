@@ -27,6 +27,19 @@ export interface EmotionPersona {
 // ─── Per-label persona definitions ───────────────────────────────────────────
 
 const PERSONA_MAP: Record<EmotionLabel, EmotionPersona> = {
+  calm: {
+    tone: "Relaxed and unhurried — the caller is composed and at ease, match their steady pace rather than injecting energy they don't have.",
+    openingStyle:
+      "Respond at the same easygoing pace as the caller. No urgency, no forced enthusiasm — just a natural, settled reply.",
+    languageRules: [
+      "Keep sentences short and unhurried — no exclamation points, no hype.",
+      "Don't over-explain or over-reassure; the caller isn't distressed, just calm.",
+      "Match their pacing rather than trying to energize the conversation.",
+    ],
+    forbidden: ["I'm so excited to help!", "Great question!", "Absolutely!"],
+    example: "Sure, that's easy enough — here's how we'll handle it.",
+  },
+
   anger: {
     tone: "Calm, sincere, and de-escalating. The caller is angry.",
     openingStyle:

@@ -324,6 +324,30 @@ describe("Issue #28: Upgraded acoustic emotion engine", () => {
     });
   });
 
+  describe("calm — a real, actively-competing bucket (Ticket 3), not just an escape hatch from sadness", () => {
+    it("classifies steady, unhurried, matter-of-fact speech as calm rather than defaulting to neutral", () => {
+      // Deliberately steady/low-variation but NOT warm (no positive valence
+      // cues, unlike the gratitude fixture above) and NOT low-pitch (unlike
+      // sadness) — plain, composed speech that previously had no positive
+      // scoring rule of its own and fell through to bare "neutral" by omission.
+      const steadySpeech: AcousticFeatures = {
+        rmsEnergy: 1100,
+        zeroCrossingRate: 0.1,
+        pitchHz: 190,
+        pitchVariation: 0.1,
+        speakingRateWPM: 148,
+        pauseDurationMs: 0,
+        pauseCount: 0,
+        durationMs: 4000,
+        energyModulationRate: 0.1,
+        pitchContour: "flat",
+      };
+      const emotion = detectAudioEmotion(steadySpeech);
+      expect(emotion).not.toBeNull();
+      expect(emotion!.label).toBe("calm");
+    });
+  });
+
   describe("decibels — new loudness feature on AcousticFeatures", () => {
     it("computes a near-0 dBFS value for a loud, high-amplitude tone", () => {
       const loud = generateSteadyPCM(200, 2000, 30000);

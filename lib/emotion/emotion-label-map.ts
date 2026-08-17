@@ -17,6 +17,7 @@ export const HF_LABEL_MAP: Record<string, EmotionLabel> = {
 
 /** Synthetic VAD values for HF/ONNX-detected emotions. */
 export const HF_VAD_MAP: Record<EmotionLabel, VAD> = {
+  calm: { v: 0.15, a: -0.5, d: 0.1 },
   anger: { v: -0.8, a: 0.8, d: 0.5 },
   frustration: { v: -0.6, a: 0.4, d: 0.2 },
   sadness: { v: -0.7, a: -0.4, d: -0.3 },

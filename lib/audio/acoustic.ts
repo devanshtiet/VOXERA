@@ -10,6 +10,7 @@
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 import type { AcousticFeatures } from "../types";
+import { CONFIG } from "../config";
 export type { AcousticFeatures };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -22,8 +23,14 @@ const MAX_PITCH_HZ = 400;       // Highest F0 to search for
 const MIN_PITCH_LAG = Math.floor(SAMPLE_RATE / MAX_PITCH_HZ);  // ~20 samples
 const MAX_PITCH_LAG = Math.floor(SAMPLE_RATE / MIN_PITCH_HZ);  // ~114 samples
 
-/** Silence threshold for pause detection (16-bit amplitude). */
-const PAUSE_ENERGY_THRESHOLD = 200;
+/**
+ * Silence threshold for pause detection (16-bit amplitude). Was a hardcoded
+ * local constant duplicating (and drifting from) CONFIG.telephony
+ * .silenceEnergyThreshold, which nothing actually read — now the single
+ * source of truth, so raising the noise floor in config actually changes
+ * behavior here instead of silently doing nothing.
+ */
+const PAUSE_ENERGY_THRESHOLD = CONFIG.telephony.silenceEnergyThreshold;
 /** Minimum silence duration (ms) to count as a pause. */
 const MIN_PAUSE_MS = 300;
 const MIN_PAUSE_SAMPLES = Math.floor((MIN_PAUSE_MS / 1000) * SAMPLE_RATE);

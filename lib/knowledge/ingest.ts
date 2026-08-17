@@ -74,12 +74,16 @@ export async function ingestDocument(args: {
       );
     }
 
-    // Extract raw text based on mime type.
+    // Extract raw text based on mime type. text/markdown, text/csv, and
+    // application/json are all readable as plain UTF-8 — the chunker
+    // doesn't need structured parsing, just the raw content.
     let rawText: string;
-    if (mimeType === "text/plain") {
+    if (mimeType === "text/plain" || mimeType === "text/markdown" || mimeType === "text/csv" || mimeType === "application/json") {
       rawText = Buffer.from(args.content).toString("utf-8");
     } else if (mimeType === "application/pdf") {
       rawText = await extractPdfText(args.content);
+    } else if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      rawText = await extractDocxText(args.content);
     } else {
       throw new Error(`Unsupported file type: ${mimeType}`);
     }
@@ -218,4 +222,12 @@ async function extractPdfText(content: Buffer | Uint8Array): Promise<string> {
   } finally {
     await parser?.destroy();
   }
+}
+
+/** DOCX text extraction via mammoth — reads the document.xml body text, dropping styling. */
+async function extractDocxText(content: Buffer | Uint8Array): Promise<string> {
+  const mammoth = await import("mammoth");
+  const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value;
 }

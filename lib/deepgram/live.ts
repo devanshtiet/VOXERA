@@ -69,9 +69,11 @@ export class DeepgramLiveWrapper {
       // gap, which fires on an ordinary mid-sentence breath or pause and
       // makes the agent start replying before the caller finished talking
       // (reported live: "starts talking before I finished my sentence").
-      // 500ms gives natural pauses room without making the agent feel slow
-      // to respond once the caller is actually done.
-      endpointing: "500",
+      // Was 500ms; live testing still showed occasional cut-offs on longer
+      // natural pauses (thinking mid-sentence, not just a breath), so bumped
+      // to 900ms — still well under the ~1-1.2s a listener perceives as
+      // "the agent went quiet," but enough room for a real pause.
+      endpointing: "900",
       utterance_end_ms: "1000",
     });
     const url = `wss://api.deepgram.com/v1/listen?${params.toString()}`;
