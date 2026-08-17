@@ -1007,3 +1007,28 @@ schema cache`. After the tenants fix, PDF upload was still failing, revealing a 
   execute it against a real database from this sandbox — the user ran it live, hit the
   `match_memories` return-type error, which was then fixed and the file re-verified; full successful
   execution end-to-end still needs final confirmation from the user's own environment.
+
+### 2026-08-17 — /login and /signup Never Checked for an Existing Session
+
+**Objective**: Reported live, following the earlier session-persistence fix: opening a new tab while
+already logged in still landed on the login form instead of the dashboard.
+
+**Root Cause**: Two separate gaps, not one. The earlier fix (middleware.ts's matcher widened, see the
+Session Not Surviving to a New Tab entry above) addressed the token silently expiring while browsing
+outside `/admin`/`/onboarding`. But even with a perfectly valid, unexpired session, `/login` and
+`/signup` unconditionally rendered the credentials form — neither page ever checked whether the
+visitor was already authenticated.
+
+**Changes Implemented**: Both `app/login/page.tsx` and `app/signup/page.tsx` now call
+`supabase.auth.getUser()` first and `redirect("/admin")` immediately if a user is present, before
+rendering the form.
+
+**Files Modified**: `app/login/page.tsx`, `app/signup/page.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (305 passing), `npm run build` — all clean
+- Live-verified after a full dev-server restart (auth/middleware changes need a hard restart, not
+  hot-reload, in Next.js): unauthenticated visits to `/login`, `/signup`, `/` are unaffected (still
+  200, form renders); `/admin` still redirects unauthenticated visitors to `/login`. Could not verify
+  the authenticated-redirect path itself live — no reachable Supabase connection to log in from this
+  sandbox — left for the user to confirm.
