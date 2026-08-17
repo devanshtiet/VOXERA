@@ -109,4 +109,12 @@ describe("createFirstAgent — failure paths", () => {
 
     await expect(createFirstAgent(db, "user-4", payload)).rejects.toThrow(/Failed to check tenant/);
   });
+
+  it("gives a migration hint when the tenants table doesn't exist yet (PGRST205)", async () => {
+    const db = makeDb([
+      { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.tenants' in the schema cache" } },
+    ]);
+
+    await expect(createFirstAgent(db, "user-5", payload)).rejects.toThrow(/migration_consolidated\.sql/);
+  });
 });
