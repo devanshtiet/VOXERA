@@ -16,6 +16,14 @@ export async function generateReply(args: {
   clientId: string;
   sessionId?: string;
   userId?: string;
+  /** Overrides CONFIG.llm.maxOutputTokens for this call only — the default
+   * is deliberately tight for voice-turn latency, but a few callers (e.g.
+   * onboarding's prompt generator) need a longer, non-conversational reply. */
+  maxOutputTokens?: number;
+  /** Set false to skip tool-calling entirely — irrelevant (and just extra
+   * latency/tokens) for one-off generation tasks like drafting a prompt,
+   * as opposed to an actual live conversational turn. Defaults to true. */
+  useTools?: boolean;
 }): Promise<LLMReply> {
 
   for (const provider of CONFIG.llm.providers) {
@@ -37,14 +45,14 @@ export async function generateReply(args: {
         ];
 
         let finalResponseText = "";
+        const useTools = args.useTools ?? true;
 
         for (let i = 0; i < 3; i++) {
           const resp = await openai.chat.completions.create({
             model: provider.model,
             messages,
-            max_tokens: CONFIG.llm.maxOutputTokens,
-            tools: TOOLS as any,
-            tool_choice: "auto",
+            max_tokens: args.maxOutputTokens ?? CONFIG.llm.maxOutputTokens,
+            ...(useTools ? { tools: TOOLS as any, tool_choice: "auto" as const } : {}),
           });
 
           const message = resp.choices[0].message;
