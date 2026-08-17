@@ -4,6 +4,7 @@ import { DeepgramLiveWrapper } from "./lib/deepgram/live";
 import { handleTurn } from "./lib/agent/orchestrator";
 import { synthesize } from "./lib/deepgram/tts";
 import { extractAcousticFeatures } from "./lib/audio/acoustic";
+import { int16ToFloat32Pcm } from "./lib/emotion/local-audio-detect";
 import { DEMO, ensureSeeded } from "./lib/bootstrap";
 import { config } from "dotenv";
 
@@ -103,6 +104,10 @@ wss.on("connection", async (ws: WebSocket, request) => {
       const acousticFeatures = turnPcm.length > 0
         ? extractAcousticFeatures(downsample16kTo8k(turnPcm), wordCount)
         : undefined;
+      // Raw 16kHz PCM (pre-downsampling) for the wav2vec2 acoustic ML
+      // diagnostic engine — the browser mic already captures at this
+      // model's native sample rate, so no resampling is needed here.
+      const rawAudioPcm16k = turnPcm.length > 0 ? int16ToFloat32Pcm(turnPcm) : undefined;
 
       const output = await handleTurn({
         sessionId,
@@ -112,6 +117,7 @@ wss.on("connection", async (ws: WebSocket, request) => {
         transcript: text,
         sttConfidence: 0.9,
         acousticFeatures,
+        rawAudioPcm16k,
         sensitivityBias,
         // Full per-engine breakdown (HF/Lexicon/Local ONNX/Acoustic) so the
         // live test drawer can show the same diagnostics the Text demo does,

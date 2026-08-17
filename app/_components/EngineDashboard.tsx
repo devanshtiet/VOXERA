@@ -1,11 +1,11 @@
 "use client";
 
-import { Cloud, BookOpen, Cpu, AudioLines, Check, Sparkles } from "lucide-react";
+import { Cloud, BookOpen, Cpu, AudioLines, Check, Sparkles, Waves } from "lucide-react";
 
 export type PipelineStage = "idle" | "recording" | "transcribing" | "thinking" | "synthesizing" | "speaking";
 
 interface EngineDiagnostic {
-  engine: "hf" | "lexicon" | "local_onnx" | "acoustic";
+  engine: "hf" | "lexicon" | "local_onnx" | "acoustic" | "acoustic_ml";
   available: boolean;
   label: string | null;
   confidence: number | null;
@@ -33,6 +33,8 @@ export interface DiagnosticEmotionResult {
   lexicon: EngineDiagnostic;
   localOnnx: EngineDiagnostic;
   acoustic: EngineDiagnostic | null;
+  /** wav2vec2-based acoustic ML engine — a real pretrained model, distinct from `acoustic`'s DSP heuristic scoring. */
+  acousticMl: EngineDiagnostic | null;
   fusion: {
     textSelection: { engine: "hf" | "lexicon" | "local_onnx"; reason: string };
     final: { label: string; confidence: number; source: string; vad: { v: number; a: number; d: number } };
@@ -112,7 +114,8 @@ const ENGINE_META: Record<string, { title: string; subtitle: string; icon: React
   hf: { title: "HuggingFace", subtitle: "Cloud API · same model as Local ONNX", icon: <Cloud className="w-3.5 h-3.5" /> },
   lexicon: { title: "Lexicon", subtitle: "Rule-based keywords", icon: <BookOpen className="w-3.5 h-3.5" /> },
   local_onnx: { title: "Local ONNX", subtitle: "On-device · same model as HuggingFace", icon: <Cpu className="w-3.5 h-3.5" /> },
-  acoustic: { title: "Acoustic", subtitle: "Heuristic DSP scoring, not a pretrained model", icon: <AudioLines className="w-3.5 h-3.5" /> },
+  acoustic: { title: "Acoustic (Heuristic)", subtitle: "Hand-written DSP scoring, not a pretrained model", icon: <AudioLines className="w-3.5 h-3.5" /> },
+  acoustic_ml: { title: "Acoustic (Wav2Vec2)", subtitle: "Pretrained SER model, on-device", icon: <Waves className="w-3.5 h-3.5" /> },
 };
 
 /** Human-readable label for an engine key, used wherever a selection needs to be displayed inline. */
@@ -184,7 +187,7 @@ function AcousticEngineCard({ d }: { d: EngineDiagnostic | null }) {
     return (
       <div className="rounded-xl border border-dashed border-[var(--console-border)] p-3.5 flex flex-col items-center justify-center text-center gap-1.5 min-h-[92px]">
         <span className="text-[var(--console-text-dim)]">{ENGINE_META.acoustic.icon}</span>
-        <div className="text-[9.5px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">Acoustic</div>
+        <div className="text-[9.5px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">Acoustic (Heuristic)</div>
         <div className="text-[10px] text-[var(--console-text-dim)]">no audio input</div>
       </div>
     );
@@ -195,7 +198,7 @@ function AcousticEngineCard({ d }: { d: EngineDiagnostic | null }) {
       <div className="flex items-center justify-between mb-0.5">
         <div className="flex items-center gap-1.5 text-[var(--console-text-dim)]">
           {ENGINE_META.acoustic.icon}
-          <span className="text-[9.5px] font-mono uppercase tracking-widest">Acoustic</span>
+          <span className="text-[9.5px] font-mono uppercase tracking-widest">Acoustic (Heuristic)</span>
         </div>
         <span className={`w-1.5 h-1.5 rounded-full ${d.available ? "bg-[var(--console-cyan)] animate-pulse" : "bg-[var(--console-text-dim)]"}`} />
       </div>
@@ -307,7 +310,10 @@ export function EngineDiagnosticPanel({
         </div>
         <div>
           <div className="voxera-console-label text-[10px] font-bold mb-2">Acoustic Engine Division</div>
-          <AcousticEngineCard d={null} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <AcousticEngineCard d={null} />
+            <EngineCard engineKey="acoustic_ml" d={null} />
+          </div>
         </div>
       </div>
     );
@@ -334,7 +340,10 @@ export function EngineDiagnosticPanel({
       </div>
       <div>
         <div className="voxera-console-label text-[10px] font-bold mb-2">Acoustic Engine Division</div>
-        <AcousticEngineCard d={diagnostics.acoustic} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <AcousticEngineCard d={diagnostics.acoustic} />
+          <EngineCard engineKey="acoustic_ml" d={diagnostics.acousticMl} />
+        </div>
       </div>
 
       <div>

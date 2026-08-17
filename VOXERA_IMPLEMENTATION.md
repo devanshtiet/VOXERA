@@ -1509,3 +1509,68 @@ narrowing `RawData` to `Buffer` for the calls that need it).
 - Could not test the full real-microphone path (getUserMedia audio → real acoustic features → biased
   label) end-to-end in this sandbox — no real mic access here. The bias mechanism itself is covered by
   the `detectAudioEmotion()` unit tests above; recommend a manual mic test in a real browser session.
+
+### 2026-08-17 — Second Acoustic Engine: wav2vec2 SER Model (Diagnostic-Only)
+
+**Objective**: User asked to add a second, real pretrained acoustic model alongside the existing DSP
+heuristic scorer — the same idea as emotion2vec+, shown side-by-side in the live analysis panel. Agreed
+approach: research first, build diagnostic-only (mirroring how the Local ONNX text model started
+diagnostic-only before its Phase 2 promotion), given no accuracy validation yet against real
+telephony-quality audio.
+
+**Model research (done before writing any code)**: emotion2vec+ has no ONNX export — confirmed via an
+open, unresolved GitHub issue in the FunASR repo. `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`
+would have been the best architectural fit (outputs continuous arousal/valence/dominance directly,
+mapping onto VOXERA's VAD system with zero label-mapping heuristics) but is licensed "research purpose
+only" — disqualified for a commercial product. Settled on
+`onnx-community/wav2vec2-base-Speech_Emotion_Recognition-ONNX`: a pre-converted, ready-to-run ONNX
+model, 6-class (SAD/ANGRY/DISGUST/FEAR/HAPPY/NEUTRAL, confirmed via its `config.json`), 16kHz native
+sampling rate (confirmed via `preprocessor_config.json` — matches server.ts's browser-mic capture rate
+exactly, so no resampling needed for that path). Live-verified before building anything further:
+~91MB quantized download (not the 379MB fp32 file initially found), ~56s cold load, ~330ms warm
+inference, real classification output on a synthetic test tone.
+
+**Implementation**: `lib/emotion/local-audio-classifier.ts` (singleton `@xenova/transformers` pipeline
+loader, mirrors `local-emotion-classifier.ts`'s pattern) and `lib/emotion/local-audio-detect.ts`
+(`detectAudioEmotionWav2Vec2()` — maps the 6-class output onto VOXERA's `EmotionLabel` space using the
+same disgust→frustration convention as `HF_LABEL_MAP`, synthesizes VAD by reusing `HF_VAD_MAP` directly
+since it already covers every label this model can produce; `int16ToFloat32Pcm()` converts the
+browser-mic's Int16 PCM to the Float32 [-1,1] range the model expects). Wired into
+`runDiagnosticEmotion()` (`lib/emotion/emotion-debug.ts`) as a new `acousticMl` field, kicked off
+concurrently with everything else so its latency overlaps rather than stacks. Threaded a new
+`rawAudioPcm16k?: Float32Array` field through `TurnInput` (`lib/agent/orchestrator.ts`, server-only —
+not part of `/api/turn`'s JSON schema, Buffer/Float32Array isn't a sane wire format there) from
+`server.ts`, which already has the raw pre-downsampled 16kHz PCM buffer sitting right there. Telephony
+audio (8kHz mulaw natively) doesn't populate this — no resampling attempted, that's a separate,
+unvalidated step. Does **not** touch production fusion (`fuseEmotion()`) — diagnostic-only, exactly as
+scoped.
+
+**UI**: `EngineDashboard.tsx`'s "Acoustic Engine Division" now shows both engines side by side —
+"Acoustic (Heuristic)" (the existing DSP scorer, relabeled for clarity now that there's a second
+acoustic card) and "Acoustic (Wav2Vec2)" (subtitle: "Pretrained SER model, on-device").
+
+**Files Added**: `lib/emotion/local-audio-classifier.ts`, `lib/emotion/local-audio-detect.ts`,
+`__tests__/emotion/local-audio-detect.test.ts`
+
+**Files Modified**: `lib/emotion/emotion-debug.ts`, `lib/agent/orchestrator.ts`, `server.ts`,
+`app/_components/EngineDashboard.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing, 4 new), `npm run build` — all clean
+- Live smoke-tested the raw model (before writing any wiring code) against a synthetic 16kHz sine wave:
+  confirmed download, load, and inference all work, returning valid softmax-summing predictions across
+  all 6 classes
+- Live end-to-end test of `runDiagnosticEmotion()` with the same synthetic audio: confirmed the new
+  `acousticMl` field populates correctly (real label/confidence/VAD/importance/memoryClassification),
+  matches the standalone smoketest's classification for the same input (consistency check), and
+  `acoustic` (DSP heuristic) correctly stays `null` when no `AcousticFeatures` are passed — proving the
+  two engines are wired independently, not accidentally coupled
+- New unit tests for `int16ToFloat32Pcm()`: silence, max positive/negative Int16 boundary values, and
+  odd-length buffer handling
+- Live browser verification against the running dev server's `/demo` page: both "Acoustic (Heuristic)"
+  and "Acoustic (Wav2Vec2)" cards render side by side with correct empty-state text ("no audio input" /
+  "awaiting turn") for Text mode, which never sends real audio — confirms the UI wiring without a false
+  positive from an untested code path
+- Could not test with real microphone audio in this sandbox (no mic access) — recommend a manual pass
+  via `TestAgentDrawer.tsx`'s "Live Test Call" in a real browser session to see real classifications
+  and compare the two acoustic engines' agreement/disagreement on genuine speech

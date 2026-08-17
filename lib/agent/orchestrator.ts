@@ -41,6 +41,13 @@ export interface TurnInput {
    * negative labels. Lets a judge/operator counteract the acoustic engine's
    * documented tendency to over-read ambiguous audio as negative. */
   sensitivityBias?: number;
+  /** Raw mono PCM at 16kHz (as Float32 samples in [-1, 1]) for the wav2vec2
+   * acoustic ML diagnostic engine (see lib/emotion/local-audio-detect.ts).
+   * Server-only (not part of the JSON /api/turn schema — Buffer/Float32Array
+   * isn't a sane wire format there); server.ts's browser-mic capture is
+   * already 16kHz, so no resampling is needed for that path. Telephony
+   * audio is 8kHz mulaw natively and doesn't populate this. */
+  rawAudioPcm16k?: Float32Array;
   /** Agent Builder (lib/db/agents.ts) agent id. When present, its owning
    * tenant's clientId overrides the plain `clientId` field above (so
    * retrieval/knowledge scoping follows the agent, not a separately-passed
@@ -238,7 +245,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
       emotionDiagnostics = await runDiagnosticEmotion(input.transcript, input.acousticFeatures, {
         stm: sttHistory,
         ltmUser: ltmUserAll,
-      }, { textEmoResult, audioSignal: audioEmo, localOnnxResult: textEmoResult.localOnnx });
+      }, { textEmoResult, audioSignal: audioEmo, localOnnxResult: textEmoResult.localOnnx }, input.rawAudioPcm16k);
       void logSessionEvent(makeEvent(evBase, "emotion_diagnostic", emotionDiagnostics as unknown as Record<string, unknown>));
     } catch (err) {
       console.warn("[Orchestrator] emotion diagnostic run failed:", err);
