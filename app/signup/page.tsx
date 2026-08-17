@@ -1,11 +1,22 @@
 import { signup } from "./actions";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { redirect } from "next/navigation";
+import { createClient } from "../../lib/db/server";
 
 export default async function SignupPage(props: {
   searchParams: Promise<{ error?: string }>;
 }) {
   const searchParams = await props.searchParams;
+
+  // Already signed in — go straight to the dashboard instead of showing
+  // the signup form again.
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    redirect("/admin");
+  }
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-[var(--color-bg-base)] font-body text-[var(--color-text-primary)]">
       {/* Background ambient glow */}

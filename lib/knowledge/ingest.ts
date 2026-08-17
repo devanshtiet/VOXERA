@@ -190,18 +190,23 @@ export async function queryKnowledgeBase(args: {
 }
 
 /**
- * PDF text extraction. Uses pdf-parse if available, otherwise falls back
- * to a basic text extraction attempt.
+ * PDF text extraction via pdf-parse v2, which rewrote the package's whole
+ * API — v1 exported a single callable function (`pdfParse(buffer)`); v2
+ * has no default export at all and instead exposes a `PDFParse` class
+ * (`new PDFParse({ data }).getText()`). Calling the old function-style API
+ * against v2 doesn't throw MODULE_NOT_FOUND, it throws "is not a
+ * function", which was surfacing as an opaque 500 on every PDF upload.
  */
 async function extractPdfText(content: Buffer | Uint8Array): Promise<string> {
+  let parser: InstanceType<typeof import("pdf-parse").PDFParse> | undefined;
   try {
     // Dynamic import so the module is optional — the rest of the
     // knowledge base still works with plain text files if pdf-parse
     // is not installed.
-    const pdfParseModule = await import("pdf-parse");
-    const pdfParse = (pdfParseModule as any).default || pdfParseModule;
-    const buf = Buffer.isBuffer(content) ? content : Buffer.from(content);
-    const result = await pdfParse(buf);
+    const { PDFParse } = await import("pdf-parse");
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    parser = new PDFParse({ data });
+    const result = await parser.getText();
     return result.text;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "MODULE_NOT_FOUND") {
@@ -210,5 +215,7 @@ async function extractPdfText(content: Buffer | Uint8Array): Promise<string> {
       );
     }
     throw err;
+  } finally {
+    await parser?.destroy();
   }
 }
