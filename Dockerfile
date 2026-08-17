@@ -1,13 +1,10 @@
-FROM node:20-alpine AS base
-
-# Required by native Node modules such as onnxruntime
-RUN apk add --no-cache libc6-compat
+FROM node:20-slim AS base
 
 # Install dependencies only when needed
 FROM base AS deps
+
 WORKDIR /app
 
-# Install dependencies based on the preferred package manager
 COPY package.json package-lock.json* ./
 RUN npm ci
 
