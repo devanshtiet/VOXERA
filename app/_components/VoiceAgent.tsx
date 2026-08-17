@@ -136,6 +136,10 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
   const [continuousMode, setContinuousMode] = useState(false);
   const [runningScenario, setRunningScenario] = useState<string | null>(null);
   const [scenarioStep, setScenarioStep] = useState(0);
+  /** Manual acoustic-engine calibration knob (-1..1, default 0) — see
+   * lib/emotion/audio-emotion.ts's detectAudioEmotion() opts doc. Persists
+   * across turns in this session so a judge/operator can dial it in once. */
+  const [sensitivityBias, setSensitivityBias] = useState(0);
   const scenarioAbortRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -179,7 +183,7 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
         const res = await fetch("/api/turn", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript: text, sttConfidence, sessionId, clientId, userId, diagnostics: true }),
+          body: JSON.stringify({ transcript: text, sttConfidence, sessionId, clientId, userId, diagnostics: true, sensitivityBias }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -220,7 +224,7 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
         setBusy(false);
       }
     },
-    [busy, sessionId, clientId, userId],
+    [busy, sessionId, clientId, userId, sensitivityBias],
   );
 
   const runScenario = useCallback(
@@ -423,6 +427,34 @@ export function VoiceAgent({ sessionId, clientId, userId, showExamples }: VoiceA
             Emotion Timeline — this session
           </div>
           <EmotionTimeline history={emotionHistory} />
+        </div>
+
+        <div className="px-5 pt-1 pb-5">
+          <div className="flex items-center justify-between mb-2">
+            <div
+              className="voxera-console-label text-[10px] font-bold"
+              title="Acoustic-heuristic engines tend to over-read ambiguous/quiet audio as negative. This nudges the acoustic engine's label scoring toward positive or negative labels before it picks a winner — it does not affect the Lexicon or Local ONNX text engines."
+            >
+              Acoustic Sensitivity Calibration
+            </div>
+            <span className="text-[11px] font-mono text-[var(--console-cyan)]">
+              {sensitivityBias === 0 ? "Off" : sensitivityBias > 0 ? `+${sensitivityBias.toFixed(1)} positive` : `${sensitivityBias.toFixed(1)} negative`}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-mono uppercase tracking-wide text-[var(--console-text-dim)] flex-none">− Negative</span>
+            <input
+              type="range"
+              min={-1}
+              max={1}
+              step={0.1}
+              value={sensitivityBias}
+              onChange={(e) => setSensitivityBias(parseFloat(e.target.value))}
+              className="w-full accent-[var(--console-cyan)] cursor-pointer"
+              aria-label="Acoustic sensitivity calibration"
+            />
+            <span className="text-[10px] font-mono uppercase tracking-wide text-[var(--console-text-dim)] flex-none">Positive +</span>
+          </div>
         </div>
       </section>
 

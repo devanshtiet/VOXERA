@@ -1,11 +1,11 @@
 "use client";
 
-import { Cloud, BookOpen, Cpu, AudioLines, Check, Sparkles } from "lucide-react";
+import { Cloud, BookOpen, Cpu, AudioLines, Check, Sparkles, Waves } from "lucide-react";
 
 export type PipelineStage = "idle" | "recording" | "transcribing" | "thinking" | "synthesizing" | "speaking";
 
 interface EngineDiagnostic {
-  engine: "hf" | "lexicon" | "local_onnx" | "acoustic";
+  engine: "hf" | "lexicon" | "local_onnx" | "acoustic" | "acoustic_ml";
   available: boolean;
   label: string | null;
   confidence: number | null;
@@ -33,8 +33,10 @@ export interface DiagnosticEmotionResult {
   lexicon: EngineDiagnostic;
   localOnnx: EngineDiagnostic;
   acoustic: EngineDiagnostic | null;
+  /** wav2vec2-based acoustic ML engine — a real pretrained model, distinct from `acoustic`'s DSP heuristic scoring. */
+  acousticMl: EngineDiagnostic | null;
   fusion: {
-    textSelection: { engine: "hf" | "lexicon"; reason: string };
+    textSelection: { engine: "hf" | "lexicon" | "local_onnx"; reason: string };
     final: { label: string; confidence: number; source: string; vad: { v: number; a: number; d: number } };
   };
   totalLatencyMs: number;
@@ -99,12 +101,27 @@ export function PipelineTracker({ stage }: { stage: PipelineStage }) {
   );
 }
 
-const ENGINE_META: Record<string, { title: string; icon: React.ReactNode }> = {
-  hf: { title: "HuggingFace", icon: <Cloud className="w-3.5 h-3.5" /> },
-  lexicon: { title: "Lexicon", icon: <BookOpen className="w-3.5 h-3.5" /> },
-  local_onnx: { title: "Local ONNX", icon: <Cpu className="w-3.5 h-3.5" /> },
-  acoustic: { title: "Acoustic", icon: <AudioLines className="w-3.5 h-3.5" /> },
+/**
+ * Engine display names are deliberately honest about what each one actually
+ * is, not just a label. HuggingFace and Local ONNX run the exact same model
+ * (j-hartmann/emotion-english-distilroberta-base) — one over the network,
+ * one in-process — so they're presented as two execution modes of one model,
+ * not two independent opinions. Acoustic is a hand-written DSP rule-scorer
+ * (pitch/energy/ZCR heuristics), not a pretrained model — no name like
+ * "emotion2vec+" would be honest here, so it isn't given one.
+ */
+const ENGINE_META: Record<string, { title: string; subtitle: string; icon: React.ReactNode }> = {
+  hf: { title: "HuggingFace", subtitle: "Cloud API · same model as Local ONNX", icon: <Cloud className="w-3.5 h-3.5" /> },
+  lexicon: { title: "Lexicon", subtitle: "Rule-based keywords", icon: <BookOpen className="w-3.5 h-3.5" /> },
+  local_onnx: { title: "Local ONNX", subtitle: "On-device · same model as HuggingFace", icon: <Cpu className="w-3.5 h-3.5" /> },
+  acoustic: { title: "Acoustic (Heuristic)", subtitle: "Hand-written DSP scoring, not a pretrained model", icon: <AudioLines className="w-3.5 h-3.5" /> },
+  acoustic_ml: { title: "Acoustic (Wav2Vec2)", subtitle: "Pretrained SER model, on-device", icon: <Waves className="w-3.5 h-3.5" /> },
 };
+
+/** Human-readable label for an engine key, used wherever a selection needs to be displayed inline. */
+function engineDisplayName(engine: string): string {
+  return ENGINE_META[engine]?.title ?? engine;
+}
 
 function engineColor(available: boolean, timedOut?: boolean) {
   if (!available) return "border-[var(--console-border)] bg-[var(--console-surface)]";
@@ -127,14 +144,15 @@ function EngineCard({ engineKey, d }: { engineKey: keyof typeof ENGINE_META; d: 
   }
   const statusColor = !d.available ? "bg-[var(--console-text-dim)]" : d.timedOut ? "bg-amber-500" : "bg-[var(--console-cyan)]";
   return (
-    <div className={`rounded-xl border p-3.5 transition-colors ${engineColor(d.available, d.timedOut)}`}>
-      <div className="flex items-center justify-between mb-2">
+    <div className={`rounded-xl border p-3.5 transition-colors ${engineColor(d.available, d.timedOut)}`} title={meta.subtitle}>
+      <div className="flex items-center justify-between mb-0.5">
         <div className="flex items-center gap-1.5 text-[var(--console-text-dim)]">
           {meta.icon}
           <span className="text-[9.5px] font-mono uppercase tracking-widest">{meta.title}</span>
         </div>
         <span className={`w-1.5 h-1.5 rounded-full ${statusColor} ${d.available && !d.timedOut ? "animate-pulse" : ""}`} />
       </div>
+      <div className="text-[8.5px] text-[var(--console-text-dim)] opacity-70 mb-1.5 leading-tight">{meta.subtitle}</div>
       {d.available ? (
         <>
           <div className="text-[15px] font-bold capitalize text-[var(--console-text)] leading-tight">{d.label}</div>
@@ -169,21 +187,22 @@ function AcousticEngineCard({ d }: { d: EngineDiagnostic | null }) {
     return (
       <div className="rounded-xl border border-dashed border-[var(--console-border)] p-3.5 flex flex-col items-center justify-center text-center gap-1.5 min-h-[92px]">
         <span className="text-[var(--console-text-dim)]">{ENGINE_META.acoustic.icon}</span>
-        <div className="text-[9.5px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">Acoustic</div>
+        <div className="text-[9.5px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">Acoustic (Heuristic)</div>
         <div className="text-[10px] text-[var(--console-text-dim)]">no audio input</div>
       </div>
     );
   }
   const metrics = d.rawMetrics;
   return (
-    <div className={`rounded-xl border p-3.5 transition-colors ${engineColor(d.available, d.timedOut)}`}>
-      <div className="flex items-center justify-between mb-2">
+    <div className={`rounded-xl border p-3.5 transition-colors ${engineColor(d.available, d.timedOut)}`} title={ENGINE_META.acoustic.subtitle}>
+      <div className="flex items-center justify-between mb-0.5">
         <div className="flex items-center gap-1.5 text-[var(--console-text-dim)]">
           {ENGINE_META.acoustic.icon}
-          <span className="text-[9.5px] font-mono uppercase tracking-widest">Acoustic</span>
+          <span className="text-[9.5px] font-mono uppercase tracking-widest">Acoustic (Heuristic)</span>
         </div>
         <span className={`w-1.5 h-1.5 rounded-full ${d.available ? "bg-[var(--console-cyan)] animate-pulse" : "bg-[var(--console-text-dim)]"}`} />
       </div>
+      <div className="text-[8.5px] text-[var(--console-text-dim)] opacity-70 mb-1.5 leading-tight">{ENGINE_META.acoustic.subtitle}</div>
       {d.available ? (
         <>
           <div className="flex items-center gap-2 flex-wrap">
@@ -291,7 +310,10 @@ export function EngineDiagnosticPanel({
         </div>
         <div>
           <div className="voxera-console-label text-[10px] font-bold mb-2">Acoustic Engine Division</div>
-          <AcousticEngineCard d={null} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <AcousticEngineCard d={null} />
+            <EngineCard engineKey="acoustic_ml" d={null} />
+          </div>
         </div>
       </div>
     );
@@ -318,7 +340,10 @@ export function EngineDiagnosticPanel({
       </div>
       <div>
         <div className="voxera-console-label text-[10px] font-bold mb-2">Acoustic Engine Division</div>
-        <AcousticEngineCard d={diagnostics.acoustic} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <AcousticEngineCard d={diagnostics.acoustic} />
+          <EngineCard engineKey="acoustic_ml" d={diagnostics.acousticMl} />
+        </div>
       </div>
 
       <div>
@@ -328,7 +353,7 @@ export function EngineDiagnosticPanel({
           <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono uppercase text-[10px] tracking-wide px-1.5 py-0.5 rounded bg-[var(--console-violet)]/20 text-[var(--console-violet)] font-bold">
-                {fusion.textSelection.engine} selected
+                {engineDisplayName(fusion.textSelection.engine)} selected
               </span>
               <span className="text-[15px] font-bold capitalize text-[var(--console-text)]">{fusion.final.label}</span>
               <span className="text-[10.5px] text-[var(--console-text-dim)]">

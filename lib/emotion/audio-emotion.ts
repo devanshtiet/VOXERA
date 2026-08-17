@@ -28,7 +28,22 @@ import { classifyConfidence } from "./confidence";
  * - >8s with clear patterns = very high (up to 0.85)
  */
 export function detectAudioEmotion(
-  features: AcousticFeatures
+  features: AcousticFeatures,
+  opts?: {
+    /**
+     * Manual calibration knob (-1..1, default 0) for the acoustic engine's
+     * documented tendency to over-read ambiguous audio as negative (quiet/
+     * flat speech reads as sadness/distress more easily than it reads as
+     * calm/positive — a known weakness of DSP-heuristic scoring, not unique
+     * to this implementation). Positive values nudge scoring toward
+     * joy/gratitude/excitement/calm; negative values nudge toward
+     * sadness/distress/fear/anger/frustration/disappointment. 0 = unchanged
+     * behavior. Applied as a scoring adjustment in inferLabelScored, not a
+     * post-hoc relabel, so it can actually flip which label wins on
+     * borderline cases instead of just cosmetically shifting a VAD number.
+     */
+    sensitivityBias?: number;
+  }
 ): (EmotionSignal & { acousticSignalHint?: "crying" | "laughing" }) | null {
   // Minimum meaningful analysis requires at least 500ms of audio
   if (features.durationMs < 500) return null;
@@ -103,6 +118,7 @@ export function detectAudioEmotion(
     // plausible "subdued" states at once (never a direct label mapping — see
     // inferLabelScored) rather than a confident signal on its own.
     quiet: energyNorm < 0.15,
+    sensitivityBias: clamp(opts?.sensitivityBias ?? 0, -1, 1),
   });
 
   // ─── Confidence based on audio duration + pattern clarity ──────────────
@@ -152,6 +168,8 @@ interface NormalizedFeatures {
   vad: VAD;
   /** Very low amplitude — used only as a soft multi-label nudge, see below. */
   quiet: boolean;
+  /** Manual calibration bias (-1..1, 0 = off) — see detectAudioEmotion()'s opts doc. */
+  sensitivityBias: number;
 }
 
 /**
@@ -160,6 +178,9 @@ interface NormalizedFeatures {
  * Returns the highest-scoring label and a pattern strength (0-1) indicating
  * how clear/distinctive the acoustic pattern is.
  */
+const POSITIVE_LABELS: EmotionLabel[] = ["joy", "gratitude", "excitement", "calm"];
+const NEGATIVE_LABELS: EmotionLabel[] = ["sadness", "distress", "fear", "anger", "frustration", "disappointment"];
+
 function inferLabelScored(
   f: NormalizedFeatures
 ): { label: EmotionLabel; patternStrength: number; signalHint?: "crying" | "laughing" } {
@@ -287,6 +308,19 @@ function inferLabelScored(
     scores.fear += 0.06;
     scores.distress += 0.06;
     scores.confusion += 0.06;
+  }
+
+  // ── Manual sensitivity calibration ──────────────────────────────────────
+  // Addresses the documented tendency of DSP-heuristic acoustic scoring to
+  // over-read ambiguous/quiet audio as negative. A real scoring adjustment
+  // (not a post-hoc relabel), so it can flip which label wins on borderline
+  // cases — e.g. a positive bias can be the difference between "sadness" and
+  // "calm" for the exact same audio, not just a cosmetic VAD shift.
+  if (f.sensitivityBias !== 0) {
+    const BIAS_STRENGTH = 0.4; // scoring nudge at full ±1 bias
+    const delta = f.sensitivityBias * BIAS_STRENGTH;
+    for (const l of POSITIVE_LABELS) scores[l] += delta;
+    for (const l of NEGATIVE_LABELS) scores[l] -= delta;
   }
 
   // ── Find winner ─────────────────────────────────────────────────────────

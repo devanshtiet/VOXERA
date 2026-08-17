@@ -6,7 +6,6 @@ import { detectAudioEmotion } from "../emotion/audio-emotion";
 import { importanceScore, novelty, policyFlag, taskCriticality } from "../emotion/importance";
 import { calculateCAI, type CAIResult } from "../emotion/cai";
 import { runDiagnosticEmotion, type DiagnosticEmotionResult } from "../emotion/emotion-debug";
-import { detectTextEmotionLocalONNX } from "../emotion/local-onnx-detect";
 import { logSessionEvent, makeEvent } from "../logging/session-logger";
 import { emitSessionEvent } from "../realtime/emitter";
 import { supabase as supabaseService } from "../db/supabase";
@@ -36,6 +35,19 @@ export interface TurnInput {
   bargeInCount?: number;
   /** Per-call override for CONFIG.emotion.diagnosticMode — lets callers (e.g. the demo UI) opt into the full engine breakdown without changing the global production default. */
   diagnostics?: boolean;
+  /** Manual acoustic-engine calibration knob (-1..1, default 0) — see
+   * detectAudioEmotion()'s opts doc in lib/emotion/audio-emotion.ts.
+   * Positive nudges scoring toward positive/calm labels, negative toward
+   * negative labels. Lets a judge/operator counteract the acoustic engine's
+   * documented tendency to over-read ambiguous audio as negative. */
+  sensitivityBias?: number;
+  /** Raw mono PCM at 16kHz (as Float32 samples in [-1, 1]) for the wav2vec2
+   * acoustic ML diagnostic engine (see lib/emotion/local-audio-detect.ts).
+   * Server-only (not part of the JSON /api/turn schema — Buffer/Float32Array
+   * isn't a sane wire format there); server.ts's browser-mic capture is
+   * already 16kHz, so no resampling is needed for that path. Telephony
+   * audio is 8kHz mulaw natively and doesn't populate this. */
+  rawAudioPcm16k?: Float32Array;
   /** Agent Builder (lib/db/agents.ts) agent id. When present, its owning
    * tenant's clientId overrides the plain `clientId` field above (so
    * retrieval/knowledge scoping follows the agent, not a separately-passed
@@ -173,18 +185,17 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
     };
   }
 
-  // Kick off Local ONNX concurrently with the production HF+Lexicon call
-  // below — it's only needed for the diagnostics breakdown further down,
-  // but starting it now (rather than after detectTextEmotion resolves)
-  // overlaps its latency with HF's instead of stacking on top of it.
   const wantsDiagnostics = input.diagnostics ?? CONFIG.emotion.diagnosticMode;
-  const localOnnxPromise = wantsDiagnostics ? detectTextEmotionLocalONNX(input.transcript) : null;
 
   // ── Issue #14: Acoustic Emotion Analysis ────────────────────────────────
+  // detectTextEmotion() now runs Local ONNX as part of its own production
+  // routing (Local ONNX > HF > Lexicon — see detect.ts), so its result is
+  // already available on textEmoResult.localOnnx for the diagnostics
+  // breakdown below — no need for a second, separate Local ONNX call here.
   const textEmoResult = await detectTextEmotion(input.transcript);
   const textEmo = textEmoResult.primary;
   const audioEmo = input.acousticFeatures
-    ? detectAudioEmotion(input.acousticFeatures)
+    ? detectAudioEmotion(input.acousticFeatures, { sensitivityBias: input.sensitivityBias })
     : (input.audioEmotion ?? null);
   const fused = fuseEmotion(textEmo, audioEmo);
 
@@ -231,11 +242,10 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   let emotionDiagnostics: DiagnosticEmotionResult | undefined;
   if (wantsDiagnostics) {
     try {
-      const localOnnxResult = await localOnnxPromise!;
       emotionDiagnostics = await runDiagnosticEmotion(input.transcript, input.acousticFeatures, {
         stm: sttHistory,
         ltmUser: ltmUserAll,
-      }, { textEmoResult, audioSignal: audioEmo, localOnnxResult });
+      }, { textEmoResult, audioSignal: audioEmo, localOnnxResult: textEmoResult.localOnnx }, input.rawAudioPcm16k);
       void logSessionEvent(makeEvent(evBase, "emotion_diagnostic", emotionDiagnostics as unknown as Record<string, unknown>));
     } catch (err) {
       console.warn("[Orchestrator] emotion diagnostic run failed:", err);

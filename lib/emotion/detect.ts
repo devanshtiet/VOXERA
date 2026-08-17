@@ -4,6 +4,7 @@ import { clamp } from "../util/math";
 import { classifyConfidence } from "./confidence";
 import { LEXICON } from "./lexicon";
 import { detectTextEmotionHF, type HFDetectResult } from "./ml-detect";
+import { detectTextEmotionLocalONNX, type LocalOnnxDetectResult } from "./local-onnx-detect";
 
 import MLClassifier from "./classifier";
 
@@ -284,28 +285,62 @@ export interface TextEmotionResult {
   primary: EmotionSignal;
   /** Lexicon engine result (always available, zero-latency). */
   lexicon: EmotionSignal & { matchedKeywords: string[] };
-  /** HuggingFace engine result (null if timed out or unavailable). */
+  /** HuggingFace remote-API engine result (null if timed out or unavailable — usually just means no HF_TOKEN is set). */
   hf: HFDetectResult;
+  /** Local ONNX engine result — the SAME underlying model as `hf` (j-hartmann/emotion-english-distilroberta-base), run in-process instead of over the network. No token, no network dependency. */
+  localOnnx: LocalOnnxDetectResult;
   /** Which engine was selected as primary and why. */
-  selection: { engine: "hf" | "lexicon"; reason: string };
+  selection: { engine: "local_onnx" | "hf" | "lexicon"; reason: string };
 }
 
 /**
- * Universal text emotion router. Runs HF and Lexicon CONCURRENTLY.
+ * Universal text emotion router. Runs Local ONNX, HF, and Lexicon CONCURRENTLY.
+ *
+ * Local ONNX and HF are the same model (see local-onnx-detect.ts's header) —
+ * Local ONNX just runs it in-process instead of over the network, so it has
+ * no HF_TOKEN dependency and no network round trip. Preferred over HF
+ * whenever it returns a signal within budget; HF (remote) is a fallback for
+ * environments where the local model failed to load, not a genuinely
+ * independent second opinion.
+ *
+ * Selection priority is NOT "ML wins whenever available" — the lexicon wins
+ * outright whenever it produced a real keyword match (deliberately hand-
+ * tuned, including negation handling the ML model has no equivalent for).
+ * This matters structurally, not just stylistically: VOXERA's lexicon
+ * expresses 12 emotion labels, but the 7-class model behind Local ONNX/HF
+ * (j-hartmann/emotion-english-distilroberta-base) maps to only 6 of them via
+ * HF_LABEL_MAP (anger, frustration, fear, joy, neutral, excitement) — it has
+ * no output class for distress, gratitude, confusion, disappointment, or
+ * calm. A confident ML prediction on one of those is worthless evidence
+ * against a lexicon match: the model isn't disagreeing, it's structurally
+ * incapable of naming the thing. This matters most for `distress`, which
+ * drives safety/escalation handling elsewhere — collapsing "I'm scared and
+ * desperate" to the model's closest bucket (`fear`) would be a real
+ * regression, not just a labeling nuance. The ML model (Local ONNX, else HF)
+ * only gets to decide when the lexicon found nothing and is sitting on its
+ * bare default.
  *
  * Design:
- *   HF ─────────→ result (races against latency budget)
+ *   Local ONNX ──→ result (races against its latency budget)
+ *   HF ─────────→ result (races against its latency budget)
  *   Lexicon ────→ result (instant, always ready)
  *
- * If HF finishes within the latency budget and returns a valid signal,
- * it's used as the primary candidate. Otherwise, lexicon is immediately used.
- *
- * Both results are always returned for diagnostic comparison.
+ * All three results are always returned for diagnostic comparison.
  */
 export async function detectTextEmotion(text: string): Promise<TextEmotionResult> {
-  // Run HF and Lexicon concurrently — lexicon is synchronous but wrapped
-  // in Promise.allSettled for uniform handling
-  const [hfSettled, lexiconResult] = await Promise.all([
+  const localOnnxBudgetMs = CONFIG.emotion.localOnnxLatencyBudgetMs;
+  const localOnnxRace = Promise.race([
+    detectTextEmotionLocalONNX(text).catch((err): LocalOnnxDetectResult => {
+      console.warn("[EmotionRouter] Local ONNX detection threw:", err);
+      return { signal: null, latencyMs: 0, errored: true };
+    }),
+    new Promise<LocalOnnxDetectResult>((resolve) =>
+      setTimeout(() => resolve({ signal: null, latencyMs: localOnnxBudgetMs, errored: false }), localOnnxBudgetMs)
+    ),
+  ]);
+
+  const [localOnnxResult, hfResult, lexiconResult] = await Promise.all([
+    localOnnxRace,
     detectTextEmotionHF(text).catch((err): HFDetectResult => {
       console.warn("[EmotionRouter] HF detection threw:", err);
       return { signal: null, latencyMs: 0, timedOut: false };
@@ -313,9 +348,7 @@ export async function detectTextEmotion(text: string): Promise<TextEmotionResult
     Promise.resolve(detectTextEmotionLexicon(text)),
   ]);
 
-  const hfResult = hfSettled;
-
-  // Small-talk guard: overrides both engines when the whole utterance is a
+  // Small-talk guard: overrides all engines when the whole utterance is a
   // bare greeting/small-talk phrase and the lexicon found no real keyword
   // hit — cheap ML models routinely mislabel these ("How are you?" → confusion).
   if (isSmallTalkGreeting(text) && lexiconResult.confidence <= 0.5) {
@@ -324,34 +357,68 @@ export async function detectTextEmotion(text: string): Promise<TextEmotionResult
       primary: neutral,
       lexicon: lexiconResult,
       hf: hfResult,
+      localOnnx: localOnnxResult,
       selection: { engine: "lexicon", reason: "Small-talk guard: bare greeting, forced neutral" },
     };
   }
 
-  // Selection logic: HF wins if it returned a valid signal within budget
+  // Lexicon wins outright on a real keyword match — deliberate, hand-tuned
+  // evidence beats a generic classifier's guess, and is the ONLY way to
+  // reach the 5 labels the ML model structurally can't express.
+  if (lexiconResult.matchedKeywords.length > 0) {
+    return {
+      primary: lexiconResult,
+      lexicon: lexiconResult,
+      hf: hfResult,
+      localOnnx: localOnnxResult,
+      selection: {
+        engine: "lexicon",
+        reason: `Lexicon matched keyword(s) [${lexiconResult.matchedKeywords.join(", ")}] → label=${lexiconResult.label}`,
+      },
+    };
+  }
+
+  // Lexicon found nothing (bare default) — let the ML model decide. Local
+  // ONNX preferred (no external dependency); HF is the fallback if Local
+  // ONNX didn't return in time.
+  if (localOnnxResult.signal) {
+    return {
+      primary: localOnnxResult.signal,
+      lexicon: lexiconResult,
+      hf: hfResult,
+      localOnnx: localOnnxResult,
+      selection: {
+        engine: "local_onnx",
+        reason: `Lexicon found no keyword match; Local ONNX returned in ${localOnnxResult.latencyMs.toFixed(1)}ms with label=${localOnnxResult.signal.label} conf=${localOnnxResult.signal.confidence.toFixed(3)}`,
+      },
+    };
+  }
+
   if (hfResult.signal && !hfResult.timedOut) {
     return {
       primary: hfResult.signal,
       lexicon: lexiconResult,
       hf: hfResult,
+      localOnnx: localOnnxResult,
       selection: {
         engine: "hf",
-        reason: `HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
+        reason: `Lexicon found no keyword match; Local ONNX unavailable, HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
       },
     };
   }
 
-  // Fallback: use lexicon
-  const reason = hfResult.timedOut
-    ? `HF timed out after ${hfResult.latencyMs.toFixed(1)}ms, using lexicon fallback`
-    : hfResult.signal === null
-      ? "HF unavailable (no token or error), using lexicon"
-      : "HF returned no signal, using lexicon";
+  // Fallback: use lexicon's bare default
+  const reason = localOnnxResult.errored
+    ? "Lexicon found no keyword match; Local ONNX errored and HF unavailable (no token or error), using lexicon default"
+    : hfResult.timedOut
+      ? "Lexicon found no keyword match; Local ONNX and HF both unavailable/timed out, using lexicon default"
+      : "Lexicon found no keyword match; Local ONNX and HF both unavailable (no token or error), using lexicon default";
 
   return {
     primary: lexiconResult,
     lexicon: lexiconResult,
     hf: hfResult,
+    localOnnx: localOnnxResult,
     selection: { engine: "lexicon", reason },
   };
 }

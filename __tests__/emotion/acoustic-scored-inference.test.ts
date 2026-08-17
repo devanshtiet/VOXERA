@@ -324,6 +324,45 @@ describe("Issue #28: Upgraded acoustic emotion engine", () => {
     });
   });
 
+  describe("sensitivity calibration — manual bias knob for the acoustic engine's negative-read tendency", () => {
+    it("does nothing at bias=0 (default, unchanged behavior)", () => {
+      const sad: AcousticFeatures = {
+        rmsEnergy: 900, zeroCrossingRate: 0.08, pitchHz: 100, pitchVariation: 0.1,
+        speakingRateWPM: 70, pauseDurationMs: 400, pauseCount: 2, durationMs: 5000,
+        energyModulationRate: 0.05, pitchContour: "falling",
+      };
+      const noOpts = detectAudioEmotion(sad);
+      const zeroBias = detectAudioEmotion(sad, { sensitivityBias: 0 });
+      expect(zeroBias?.label).toBe(noOpts?.label);
+    });
+
+    it("a positive bias can flip a borderline sadness read to calm — a real scoring effect, not cosmetic", () => {
+      // Deliberately borderline: mild-low energy/pitch, close to (but not
+      // over) the sadness threshold, so a scoring nudge can tip it either way.
+      const borderline: AcousticFeatures = {
+        rmsEnergy: 1150, zeroCrossingRate: 0.15, pitchHz: 168, pitchVariation: 0.13,
+        speakingRateWPM: 95, pauseDurationMs: 100, pauseCount: 1, durationMs: 4000,
+        energyModulationRate: 0.15, pitchContour: "falling",
+      };
+      const unbiased = detectAudioEmotion(borderline);
+      expect(unbiased?.label).toBe("sadness");
+
+      const positivelyBiased = detectAudioEmotion(borderline, { sensitivityBias: 1 });
+      expect(positivelyBiased?.label).toBe("calm");
+    });
+
+    it("clamps out-of-range bias values instead of over/under-shooting", () => {
+      const borderline: AcousticFeatures = {
+        rmsEnergy: 1150, zeroCrossingRate: 0.15, pitchHz: 168, pitchVariation: 0.13,
+        speakingRateWPM: 95, pauseDurationMs: 100, pauseCount: 1, durationMs: 4000,
+        energyModulationRate: 0.15, pitchContour: "falling",
+      };
+      const clampedHigh = detectAudioEmotion(borderline, { sensitivityBias: 5 });
+      const atMax = detectAudioEmotion(borderline, { sensitivityBias: 1 });
+      expect(clampedHigh?.label).toBe(atMax?.label);
+    });
+  });
+
   describe("calm — a real, actively-competing bucket (Ticket 3), not just an escape hatch from sadness", () => {
     it("classifies steady, unhurried, matter-of-fact speech as calm rather than defaulting to neutral", () => {
       // Deliberately steady/low-variation but NOT warm (no positive valence

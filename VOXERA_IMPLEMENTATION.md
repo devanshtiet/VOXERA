@@ -1315,3 +1315,262 @@ entry — none were found by manual grep alone.
   "ACOUSTIC ENGINE DIVISION" both render as separate labeled sections with real data, HF correctly
   shows its genuine "unavailable (no token or error)" state, fusion callout correctly shows "LEXICON
   SELECTED"
+
+### 2026-08-17 — PDF Knowledge Upload: "Setting up fake worker failed" Under Turbopack Dev
+
+**Objective**: User hit `Module not found: Can't resolve './KnowledgeTab'` first — a stale Turbopack
+dev cache (same class of bug as the earlier `AgentStatusBanner` false positive), fixed by the standard
+`rm -rf .next` + restart. After that, uploading a PDF into the new Knowledge tab surfaced a second,
+real error: `Setting up fake worker failed: "Cannot find module '.../.next/dev/server/chunks/
+pdf.worker.mjs' imported from .../.next/dev/server/chunks/node_modules_pdfjs-dist_legacy_build_pdf_
+mjs_....js"`.
+
+**Root Cause**: `pdf-parse` v2 uses `pdfjs-dist` under the hood, which dynamically resolves its own
+worker script (`pdf.worker.mjs`) relative to a real `node_modules` path at runtime. Turbopack (and
+Webpack) bundle server-side dependencies into hashed chunk files under `.next/dev/server/chunks/` by
+default — once `pdfjs-dist` is bundled that way, its worker-path resolution point at a chunk path that
+never actually contains the worker file, so every PDF upload failed at the parsing step specifically
+(text/markdown/csv/json uploads, which don't touch `pdf-parse`, were unaffected — matches why the
+earlier live-verified markdown ingest test passed cleanly while this only surfaced on a real PDF).
+
+**Fix**: Added `serverExternalPackages: ["pdf-parse", "pdfjs-dist"]` to `next.config.ts` — the
+documented Next.js mechanism for excluding a package from server-side bundling, so Node's normal
+`require`/`import` resolves it (and its worker file) from its real location in `node_modules` instead.
+
+**Files Modified**: `next.config.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (308 passing), `npm run build` — all clean
+- Live-verified against the actual dev server (not just a production build, since the bug is
+  Turbopack-dev-specific): restarted the dev server fresh with `rm -rf .next` so the config change
+  took effect, added a temporary diagnostic API route that parses a minimal hand-built PDF via the
+  same `pdf-parse` `PDFParse` class `lib/knowledge/ingest.ts` uses, hit it through the real running
+  server — before this fix this reproduces the exact reported "fake worker" error; after the fix it
+  returned `{"ok":true,"text":"Hello PDF worker test..."}`. Diagnostic route deleted after verification,
+  not part of the shipped change.
+
+### 2026-08-17 — Admin Dashboard UI Consistency Pass
+
+**Objective**: User asked to make "all the dashboard pages" look classy/modern/professional, off a
+screenshot of `/admin/knowledge` that looked visibly plainer than the recently-redesigned Agent
+Builder page.
+
+**Root cause, not a redesign-from-scratch situation**: the app already has one deliberate, polished
+design system — `app/globals.css`'s `--color-*` tokens (Bricolage Grotesque display font, DM Sans
+body font, violet→cyan gradient accents), already used correctly by Agent Builder, the landing page,
+and `/demo`. The other admin pages (`/admin`, `/admin/knowledge`, `/admin/sessions`, `/admin/tenants`,
+`/admin/rag`) mostly *did* reference the same `--color-*` tokens, but were written before (or without
+noticing) that `globals.css` had settled on light-only theming — every one of them still had scattered
+hardcoded dark-theme assumptions left over: raw `text-white` on headings/values/hover states (invisible
+or near-invisible against the light `--color-bg-elevated: #FFFFFF` background), `bg-gray-800`/
+`bg-zinc-800` as "subtle" borders or empty-state fills (renders as a heavy dark line/blob on a light
+page, not subtle), and one page using a lighter drop-shadow opacity than Agent Builder's established
+`rgba(0,0,0,0.5)`. `/admin/settings` and `/admin/try-call` had already been written correctly and
+needed no fixes beyond a header icon for visual consistency.
+
+**Fix**: went through each of `/admin`, `/admin/knowledge`, `/admin/sessions`, `/admin/tenants`,
+`/admin/rag`, `/admin/try-call` and: replaced every hardcoded `text-white`/`hover:text-white` that
+wasn't on a genuinely dark surface (gradient buttons and tooltip popovers with an explicit `bg-black`
+correctly kept `text-white`) with the semantic `--color-text-primary` token; replaced `bg-gray-800`/
+`bg-zinc-800`/`text-zinc-500`/`text-zinc-300` neutral-gray fallbacks with the equivalent `--color-*`
+tokens; standardized card shadows to Agent Builder's `shadow-[0_4px_30px_rgba(0,0,0,0.5)]`; aligned
+error/success banner styling to the low-opacity-tint-plus-solid-text pattern already proven in Agent
+Builder (`bg-red-950/[0.04] border-red-500/25 text-red-600`, and the emerald equivalent) instead of
+the darker `bg-red-950/30 border-red-900/50 text-red-400` combo that reads as muddy on a light
+background; added the icon + `font-display text-3xl` header pattern consistently across all pages
+(Knowledge Base, Sessions, Tenants, Try a Call); rebuilt the Knowledge Base page's upload panel with a
+proper drag-and-drop zone (previously click-only) and updated its accepted-formats copy to match the
+now-expanded TXT/PDF/Markdown/CSV/JSON/DOCX support from the earlier entry in this file.
+
+**Files Modified**: `app/admin/page.tsx`, `app/admin/knowledge/page.tsx`, `app/admin/sessions/page.tsx`,
+`app/admin/tenants/page.tsx`, `app/admin/rag/page.tsx`, `app/admin/try-call/page.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (308 passing), `npm run build` — all clean
+- Could not visually click through the authenticated `/admin/*` pages in this pass — same limitation
+  noted in earlier entries, this sandbox has no login credentials for the admin dashboard. Recommend a
+  manual pass in a running dev server across all six pages before considering this fully verified.
+
+### 2026-08-17 — Text Emotion Routing: Local ONNX Was Wired Up But Never Used
+
+**Objective**: User's screenshot of the live analysis panel showed every turn in a real conversation
+(happy, curious, small-talk) landing on "Confusion" via Lexicon, while Local ONNX sat right next to it
+confidently saying "Joy" (99%) — completely ignored. They asked why HuggingFace shows greyed out, and
+whether Local ONNX is secretly the same thing shown twice.
+
+**Root cause, confirmed by reading the code, not guessed**: HuggingFace and Local ONNX genuinely run
+the identical model — `j-hartmann/emotion-english-distilroberta-base` — HF calls it remotely via
+HuggingFace's Inference API (needs `HF_TOKEN`, network round trip), Local ONNX runs it in-process via
+`@xenova/transformers` (no token, no network, ~9ms once warm). HF greys out simply because no
+`HF_TOKEN` is configured — by design, not a bug. The real bug: `detectTextEmotion()`
+(`lib/emotion/detect.ts`) only ever raced HF vs Lexicon — Local ONNX was computed solely for the
+diagnostics panel's side-by-side comparison and never had any influence on the actual selected result,
+despite being reliable and dependency-free.
+
+**First attempt was wrong, caught by the test suite**: initially just flipped priority to "Local ONNX
+wins whenever it returns a signal." This broke 11 passing regression tests. Investigating why (not
+just loosening the assertions) surfaced a real, structural problem: the 7-class model behind
+Local ONNX/HF maps to only 6 of VOXERA's 12 emotion labels via `HF_LABEL_MAP` (anger, frustration,
+fear, joy, neutral, excitement) — it has **no output class at all** for `distress`, `gratitude`,
+`confusion`, `disappointment`, or `calm`. Concretely: for "How am I supposed to deal with this, I'm
+scared and desperate?" the lexicon correctly matches `distress` (0.75 conf, real keyword hits); Local
+ONNX confidently says `fear` (0.98 conf) — not because it disagrees, but because it structurally
+cannot say `distress`. Since `distress` drives safety/escalation handling elsewhere in the pipeline,
+blindly trusting higher ML confidence here would have been a real regression, not just a labeling
+nuance.
+
+**Fix**: `detectTextEmotion()`'s selection logic is now: **lexicon wins outright whenever it produced
+a real keyword match** (deliberate, hand-tuned, including negation handling neither ML model has an
+equivalent for) — the ML model (Local ONNX, preferred; HF as fallback) only gets to decide when the
+lexicon found nothing and is sitting on its bare `neutral` default. This is exactly the situation Local
+ONNX is strictly better for (previously that bare default, e.g. confidence 0.5 flat, is now replaced by
+a real classification, often >0.9 confidence). `lib/emotion/emotion-debug.ts`'s diagnostic-mirror logic
+and `lib/agent/orchestrator.ts` (which previously ran Local ONNX a second, redundant time purely for
+diagnostics) were updated to match. Live-verified against the exact conversational pattern from the
+screenshot — previously-uniform "Confusion" readings now correctly vary (excitement/neutral/joy) and
+match what a human would actually read from the text.
+
+**UI**: `EngineDashboard.tsx`'s engine cards now carry honest subtitles — HuggingFace: "Cloud API · same
+model as Local ONNX", Local ONNX: "On-device · same model as HuggingFace", Lexicon: "Rule-based
+keywords", Acoustic: "Heuristic DSP scoring, not a pretrained model" (there is no real pretrained
+acoustic model — e.g. emotion2vec+ — integrated anywhere in this codebase; a past commit explicitly
+considered and deferred that as "a large, unvalidated undertaking", still true). The "X selected" badge
+in the Final Result panel now renders a proper display name (e.g. "Local ONNX") instead of the raw
+`local_onnx` selection-engine string.
+
+**Files Modified**: `lib/emotion/detect.ts`, `lib/emotion/emotion-debug.ts`, `lib/agent/orchestrator.ts`,
+`lib/config.ts`, `app/_components/EngineDashboard.tsx`, `__tests__/emotion/concurrent-engines.test.ts`,
+`__tests__/emotion/detect.test.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (309 passing) — all clean
+- Investigated all 11 initial test failures individually rather than updating assertions blindly;
+  fixed the 3 that were mock-setup gaps (tests needed to also mock Local ONNX, matching the existing
+  ml-detect mocking pattern) and updated 1 exact-confidence assertion that was specifically pinned to
+  the lexicon's hardcoded 0.5 default, now correctly superseded by a real ONNX classification
+- Live-verified via a standalone script reproducing the screenshot's exact conversational turns —
+  confirmed the "everything reads as Confusion" bug is gone and results now vary correctly
+- Live browser verification against the running dev server's `/demo` page: sent "I'm feeling really
+  good about this, thank you so much!", confirmed Local ONNX (99% conf, 60ms) and Lexicon (69% conf,
+  keyword match on "good, thank you") both correctly say Joy, HF correctly shows its genuine
+  unavailable state with the new subtitle, and the Final Result badge correctly renders "LEXICON
+  SELECTED" with an accurate, specific reason string
+
+### 2026-08-17 — Acoustic Sensitivity Calibration Slider, and a Real Pre-Existing WS Bug It Surfaced
+
+**Objective**: User asked for a manual slider/knob to calibrate the acoustic engine's known tendency
+to over-read ambiguous audio as negative, as part of the same round of feedback on the live analysis
+page.
+
+**Design**: A `-1..1` bias (default 0, no behavior change) applied as a real scoring adjustment inside
+`inferLabelScored()` (`lib/emotion/audio-emotion.ts`) — positive values add to
+joy/gratitude/excitement/calm and subtract from sadness/distress/fear/anger/frustration/disappointment
+before the winning label is picked, so it can flip borderline cases (verified: the same audio reads as
+`sadness` at bias=0 and `calm` at bias=+1) rather than just cosmetically shifting a reported VAD number
+after the fact. Threaded through `TurnInput`/`handleTurn()` (`lib/agent/orchestrator.ts`) and
+`/api/turn`'s zod schema for the text-mode demo path, though that path never actually has
+`acousticFeatures` to begin with (text-only input has no audio) — the slider only does anything where
+real audio is involved.
+
+**The real audio path doesn't go through `/api/turn` at all** — `TestAgentDrawer.tsx`'s "Live Test
+Call" (the exact UI in the user's screenshot) talks to `server.ts`'s WebSocket server directly, which
+extracts real acoustic features server-side and calls `handleTurn()` itself. Added a
+`set_sensitivity_bias` WS control message type, a per-connection `sensitivityBias` variable in
+`server.ts`, and the matching slider UI + `ws.send()` call in `TestAgentDrawer.tsx`.
+
+**Found a real, pre-existing bug live-testing the WS wiring, not from code review**: sent
+`set_sensitivity_bias` to a running server and it never took effect — server logs showed it being
+counted as an audio chunk instead. `server.ts`'s message handler distinguished binary audio from JSON
+text control messages via `Buffer.isBuffer(message)`, but this version of the `ws` library delivers
+**both** binary and text frames as `Buffer` objects — confirmed by temporarily logging the handler's
+actual `isBinary` argument (which the handler took but never read) alongside `Buffer.isBuffer()`: for
+a genuine text frame, `isBuffer=true, isBinary=false`. This means every client-sent text control
+message — `ping`, `barge_in`, and now `set_sensitivity_bias` — had been silently misrouted into the
+"it's audio" branch this whole time: fed to Deepgram as garbage PCM, pushed into `turnAudioChunks`
+polluting acoustic feature extraction, and never reaching the `JSON.parse` branch at all. Fixed by
+discriminating on `isBinary` (with `Buffer.isBuffer()` kept alongside purely for TypeScript's benefit,
+narrowing `RawData` to `Buffer` for the calls that need it).
+
+**Files Modified**: `lib/emotion/audio-emotion.ts`, `lib/agent/orchestrator.ts`, `app/api/turn/route.ts`,
+`app/_components/VoiceAgent.tsx`, `app/_components/TestAgentDrawer.tsx`, `server.ts`,
+`__tests__/emotion/acoustic-scored-inference.test.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (312 passing, 3 new), `npm run build` — all clean
+- New regression tests directly on `detectAudioEmotion()`: bias=0 is a true no-op vs. no options passed
+  at all; a specific borderline fixture flips from `sadness` to `calm` at bias=+1 (proving the bias is a
+  real scoring effect, not cosmetic); an out-of-range bias (5) clamps to the same result as bias=1
+- Live-verified the WS control-message fix against a real running `npm run server` instance with a
+  standalone WebSocket test client: before the fix, `set_sensitivity_bias` was silently swallowed and
+  counted as an audio chunk (`audioChunksReceived=1`); after the fix, the server log shows
+  `[Server] Sensitivity bias set to 0.7.` and a separate `ping` correctly receives a `pong`, with
+  `audioChunksReceived=0` for that connection — confirming text control messages no longer leak into
+  the audio path
+- Could not test the full real-microphone path (getUserMedia audio → real acoustic features → biased
+  label) end-to-end in this sandbox — no real mic access here. The bias mechanism itself is covered by
+  the `detectAudioEmotion()` unit tests above; recommend a manual mic test in a real browser session.
+
+### 2026-08-17 — Second Acoustic Engine: wav2vec2 SER Model (Diagnostic-Only)
+
+**Objective**: User asked to add a second, real pretrained acoustic model alongside the existing DSP
+heuristic scorer — the same idea as emotion2vec+, shown side-by-side in the live analysis panel. Agreed
+approach: research first, build diagnostic-only (mirroring how the Local ONNX text model started
+diagnostic-only before its Phase 2 promotion), given no accuracy validation yet against real
+telephony-quality audio.
+
+**Model research (done before writing any code)**: emotion2vec+ has no ONNX export — confirmed via an
+open, unresolved GitHub issue in the FunASR repo. `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`
+would have been the best architectural fit (outputs continuous arousal/valence/dominance directly,
+mapping onto VOXERA's VAD system with zero label-mapping heuristics) but is licensed "research purpose
+only" — disqualified for a commercial product. Settled on
+`onnx-community/wav2vec2-base-Speech_Emotion_Recognition-ONNX`: a pre-converted, ready-to-run ONNX
+model, 6-class (SAD/ANGRY/DISGUST/FEAR/HAPPY/NEUTRAL, confirmed via its `config.json`), 16kHz native
+sampling rate (confirmed via `preprocessor_config.json` — matches server.ts's browser-mic capture rate
+exactly, so no resampling needed for that path). Live-verified before building anything further:
+~91MB quantized download (not the 379MB fp32 file initially found), ~56s cold load, ~330ms warm
+inference, real classification output on a synthetic test tone.
+
+**Implementation**: `lib/emotion/local-audio-classifier.ts` (singleton `@xenova/transformers` pipeline
+loader, mirrors `local-emotion-classifier.ts`'s pattern) and `lib/emotion/local-audio-detect.ts`
+(`detectAudioEmotionWav2Vec2()` — maps the 6-class output onto VOXERA's `EmotionLabel` space using the
+same disgust→frustration convention as `HF_LABEL_MAP`, synthesizes VAD by reusing `HF_VAD_MAP` directly
+since it already covers every label this model can produce; `int16ToFloat32Pcm()` converts the
+browser-mic's Int16 PCM to the Float32 [-1,1] range the model expects). Wired into
+`runDiagnosticEmotion()` (`lib/emotion/emotion-debug.ts`) as a new `acousticMl` field, kicked off
+concurrently with everything else so its latency overlaps rather than stacks. Threaded a new
+`rawAudioPcm16k?: Float32Array` field through `TurnInput` (`lib/agent/orchestrator.ts`, server-only —
+not part of `/api/turn`'s JSON schema, Buffer/Float32Array isn't a sane wire format there) from
+`server.ts`, which already has the raw pre-downsampled 16kHz PCM buffer sitting right there. Telephony
+audio (8kHz mulaw natively) doesn't populate this — no resampling attempted, that's a separate,
+unvalidated step. Does **not** touch production fusion (`fuseEmotion()`) — diagnostic-only, exactly as
+scoped.
+
+**UI**: `EngineDashboard.tsx`'s "Acoustic Engine Division" now shows both engines side by side —
+"Acoustic (Heuristic)" (the existing DSP scorer, relabeled for clarity now that there's a second
+acoustic card) and "Acoustic (Wav2Vec2)" (subtitle: "Pretrained SER model, on-device").
+
+**Files Added**: `lib/emotion/local-audio-classifier.ts`, `lib/emotion/local-audio-detect.ts`,
+`__tests__/emotion/local-audio-detect.test.ts`
+
+**Files Modified**: `lib/emotion/emotion-debug.ts`, `lib/agent/orchestrator.ts`, `server.ts`,
+`app/_components/EngineDashboard.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing, 4 new), `npm run build` — all clean
+- Live smoke-tested the raw model (before writing any wiring code) against a synthetic 16kHz sine wave:
+  confirmed download, load, and inference all work, returning valid softmax-summing predictions across
+  all 6 classes
+- Live end-to-end test of `runDiagnosticEmotion()` with the same synthetic audio: confirmed the new
+  `acousticMl` field populates correctly (real label/confidence/VAD/importance/memoryClassification),
+  matches the standalone smoketest's classification for the same input (consistency check), and
+  `acoustic` (DSP heuristic) correctly stays `null` when no `AcousticFeatures` are passed — proving the
+  two engines are wired independently, not accidentally coupled
+- New unit tests for `int16ToFloat32Pcm()`: silence, max positive/negative Int16 boundary values, and
+  odd-length buffer handling
+- Live browser verification against the running dev server's `/demo` page: both "Acoustic (Heuristic)"
+  and "Acoustic (Wav2Vec2)" cards render side by side with correct empty-state text ("no audio input" /
+  "awaiting turn") for Text mode, which never sends real audio — confirms the UI wiring without a false
+  positive from an untested code path
+- Could not test with real microphone audio in this sandbox (no mic access) — recommend a manual pass
+  via `TestAgentDrawer.tsx`'s "Live Test Call" in a real browser session to see real classifications
+  and compare the two acoustic engines' agreement/disagreement on genuine speech

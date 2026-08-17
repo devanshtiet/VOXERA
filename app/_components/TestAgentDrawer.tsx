@@ -336,6 +336,9 @@ export function TestAgentDrawer() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(""); // "" = demo agent
   const [activeAgentName, setActiveAgentName] = useState<string | null>(null);
   const [showReasoning, setShowReasoning] = useState(true);
+  /** Manual acoustic-engine calibration knob (-1..1, default 0) — see
+   * lib/emotion/audio-emotion.ts's detectAudioEmotion() opts doc. */
+  const [sensitivityBias, setSensitivityBiasState] = useState(0);
   // Which turn the analytics column is showing. Auto-advances to each new
   // reply as it arrives (the original "always show what just happened"
   // behavior); clicking an older bubble in the transcript pins it here so
@@ -482,6 +485,11 @@ export function TestAgentDrawer() {
     setStatus("listening");
   }, []);
 
+  const setSensitivityBias = useCallback((value: number) => {
+    setSensitivityBiasState(value);
+    wsRef.current?.send(JSON.stringify({ type: "set_sensitivity_bias", value }));
+  }, []);
+
   const startCall = useCallback(async () => {
     setError(null);
     if (!getMicSupport()) {
@@ -512,6 +520,9 @@ export function TestAgentDrawer() {
 
       ws.onopen = () => {
         active.current = true;
+        if (sensitivityBias !== 0) {
+          ws.send(JSON.stringify({ type: "set_sensitivity_bias", value: sensitivityBias }));
+        }
       };
 
       ws.onerror = () => {
@@ -671,7 +682,7 @@ export function TestAgentDrawer() {
       setStatus("error");
       endCall();
     }
-  }, [endCall, startLevelLoop, vad, bargeIn, agents, selectedAgentId]);
+  }, [endCall, startLevelLoop, vad, bargeIn, agents, selectedAgentId, sensitivityBias]);
 
   const isLive = status !== "idle" && status !== "error";
 
@@ -875,6 +886,34 @@ export function TestAgentDrawer() {
             <div>
               <div className="voxera-console-label text-[9px] mb-1.5">Session Trajectory</div>
               <EmotionTimeline history={emotionHistory} />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <div
+                  className="voxera-console-label text-[9px]"
+                  title="Acoustic-heuristic engines tend to over-read ambiguous/quiet audio as negative. This nudges the Acoustic engine's label scoring toward positive or negative labels before it picks a winner — it does not affect the Lexicon or Local ONNX text engines."
+                >
+                  Acoustic Sensitivity Calibration
+                </div>
+                <span className="text-[10.5px] font-mono text-[var(--console-cyan)]">
+                  {sensitivityBias === 0 ? "Off" : sensitivityBias > 0 ? `+${sensitivityBias.toFixed(1)} positive` : `${sensitivityBias.toFixed(1)} negative`}
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="text-[9px] font-mono uppercase tracking-wide text-[var(--console-text-dim)] flex-none">− Neg</span>
+                <input
+                  type="range"
+                  min={-1}
+                  max={1}
+                  step={0.1}
+                  value={sensitivityBias}
+                  onChange={(e) => setSensitivityBias(parseFloat(e.target.value))}
+                  className="w-full accent-[var(--console-cyan)] cursor-pointer"
+                  aria-label="Acoustic sensitivity calibration"
+                />
+                <span className="text-[9px] font-mono uppercase tracking-wide text-[var(--console-text-dim)] flex-none">Pos +</span>
+              </div>
             </div>
 
             {turns.length > 0 && (

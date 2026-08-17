@@ -4,17 +4,18 @@ import { detectTextEmotionHF, type HFDetectResult } from "./ml-detect";
 import { detectTextEmotionLexicon, fuseEmotion, type TextEmotionResult } from "./detect";
 import { detectTextEmotionLocalONNX, type LocalOnnxDetectResult } from "./local-onnx-detect";
 import { detectAudioEmotion } from "./audio-emotion";
+import { detectAudioEmotionWav2Vec2, type LocalAudioDetectResult } from "./local-audio-detect";
 import { buildEmotionContext } from "./context";
 import { importanceScore, taskCriticality, policyFlag } from "./importance";
 
 /**
  * Per-engine diagnostic breakdown — Phase 1 instrumentation (see the
- * "Emotion Engine Overhaul" issue). Lets HF, Lexicon, Local ONNX, and
- * Acoustic be compared side-by-side for the same input, independent of
- * which one production selects as primary.
+ * "Emotion Engine Overhaul" issue). Lets HF, Lexicon, Local ONNX, Acoustic
+ * (DSP heuristic), and Acoustic ML (wav2vec2) be compared side-by-side for
+ * the same input, independent of which one production selects as primary.
  */
 export interface EngineDiagnostic {
-  engine: "hf" | "lexicon" | "local_onnx" | "acoustic";
+  engine: "hf" | "lexicon" | "local_onnx" | "acoustic" | "acoustic_ml";
   available: boolean;
   label: EmotionLabel | null;
   confidence: number | null;
@@ -44,6 +45,8 @@ export interface DiagnosticEmotionResult {
   lexicon: EngineDiagnostic;
   localOnnx: EngineDiagnostic;
   acoustic: EngineDiagnostic | null;
+  /** wav2vec2-based acoustic ML engine — null whenever raw 16kHz audio wasn't supplied (e.g. telephony, which is 8kHz mulaw natively). */
+  acousticMl: EngineDiagnostic | null;
   fusion: {
     /** Which engine detectTextEmotion() actually selected as primary in production. */
     textSelection: TextEmotionResult["selection"];
@@ -94,6 +97,12 @@ function scoreSignal(
  * from scratch — a real-time caller doing both the production turn and a
  * diagnostics breakdown on every turn would otherwise pay for a second HF
  * API round trip it doesn't need.
+ *
+ * `rawAudio16kHz` (raw mono PCM, Float32 in [-1, 1], the browser-mic
+ * capture's native rate) runs the wav2vec2 acoustic ML engine (see
+ * local-audio-detect.ts) alongside everything else. Omit it (e.g. for
+ * telephony, which is 8kHz mulaw) and `acousticMl` comes back null — no
+ * attempt to resample, that's a separate, unvalidated step.
  */
 export async function runDiagnosticEmotion(
   text: string,
@@ -103,13 +112,24 @@ export async function runDiagnosticEmotion(
     textEmoResult: TextEmotionResult;
     audioSignal: EmotionSignal | null;
     localOnnxResult: LocalOnnxDetectResult;
-  }
+  },
+  rawAudio16kHz?: Float32Array
 ): Promise<DiagnosticEmotionResult> {
   const start = performance.now();
 
   let hfResult: HFDetectResult;
   let lexiconResult: ReturnType<typeof detectTextEmotionLexicon>;
   let localOnnxResult: LocalOnnxDetectResult;
+
+  // Kick off the (potentially slow, cold-start-loaded) wav2vec2 classifier
+  // concurrently with everything else rather than after it, so its latency
+  // overlaps instead of stacking on top.
+  const acousticMlPromise: Promise<LocalAudioDetectResult | null> = rawAudio16kHz
+    ? detectAudioEmotionWav2Vec2(rawAudio16kHz).catch((err): LocalAudioDetectResult => {
+        console.warn("[EmotionDiagnostic] wav2vec2 threw:", err);
+        return { signal: null, latencyMs: 0, errored: true };
+      })
+    : Promise.resolve(null);
 
   if (precomputed) {
     hfResult = precomputed.textEmoResult.hf;
@@ -131,10 +151,13 @@ export async function runDiagnosticEmotion(
     ? precomputed.audioSignal
     : (acousticFeatures ? detectAudioEmotion(acousticFeatures) : null);
 
+  const acousticMlResult = await acousticMlPromise;
+
   const hfScore = scoreSignal(text, hfResult.signal, history);
   const lexiconScore = scoreSignal(text, lexiconResult, history);
   const localOnnxScore = scoreSignal(text, localOnnxResult.signal, history);
   const acousticScore = scoreSignal(text, audioSignal, history);
+  const acousticMlScore = scoreSignal(text, acousticMlResult?.signal ?? null, history);
 
   const hf: EngineDiagnostic = {
     engine: "hf",
@@ -202,23 +225,61 @@ export async function runDiagnosticEmotion(
       }
     : null;
 
-  // Mirror the production selection logic in detect.ts:detectTextEmotion() exactly,
-  // so `fusion.textSelection` reflects what the live pipeline actually chose.
+  const acousticMl: EngineDiagnostic | null = rawAudio16kHz
+    ? {
+        engine: "acoustic_ml",
+        available: !!acousticMlResult?.signal,
+        label: acousticMlResult?.signal?.label ?? null,
+        confidence: acousticMlResult?.signal?.confidence ?? null,
+        intensity: acousticMlResult?.signal?.intensity ?? null,
+        vad: acousticMlResult?.signal?.vad ?? null,
+        latencyMs: acousticMlResult?.latencyMs ?? 0,
+        importance: acousticMlScore.importance,
+        memoryClassification: acousticMlScore.memoryClassification,
+        unavailableReason: acousticMlResult?.signal
+          ? undefined
+          : acousticMlResult?.errored
+            ? "model failed to load/classify"
+            : "audio too short (<500ms)",
+      }
+    : null;
+
+  // Mirror the production selection logic in detect.ts:detectTextEmotion()
+  // exactly — lexicon wins outright on any real keyword match (deliberate,
+  // hand-tuned, and the only way to reach the 5 labels the ML model's
+  // 7-class output space can't express at all); the ML model only decides
+  // when the lexicon found nothing — so `fusion.textSelection` reflects what
+  // the live pipeline actually chose.
   const textSelection: TextEmotionResult["selection"] =
-    hfResult.signal && !hfResult.timedOut
+    lexiconResult.matchedKeywords.length > 0
       ? {
-          engine: "hf",
-          reason: `HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
-        }
-      : {
           engine: "lexicon",
-          reason: hfResult.timedOut
-            ? `HF timed out after ${hfResult.latencyMs.toFixed(1)}ms, using lexicon fallback`
-            : hfResult.signal === null
-              ? "HF unavailable (no token or error), using lexicon"
-              : "HF returned no signal, using lexicon",
-        };
-  const textPrimary = textSelection.engine === "hf" && hfResult.signal ? hfResult.signal : lexiconResult;
+          reason: `Lexicon matched keyword(s) [${lexiconResult.matchedKeywords.join(", ")}] → label=${lexiconResult.label}`,
+        }
+      : localOnnxResult.signal
+        ? {
+            engine: "local_onnx",
+            reason: `Lexicon found no keyword match; Local ONNX returned in ${localOnnxResult.latencyMs.toFixed(1)}ms with label=${localOnnxResult.signal.label} conf=${localOnnxResult.signal.confidence.toFixed(3)}`,
+          }
+        : hfResult.signal && !hfResult.timedOut
+          ? {
+              engine: "hf",
+              reason: `Lexicon found no keyword match; Local ONNX unavailable, HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
+            }
+          : {
+              engine: "lexicon",
+              reason: localOnnxResult.errored
+                ? "Lexicon found no keyword match; Local ONNX errored and HF unavailable (no token or error), using lexicon default"
+                : hfResult.timedOut
+                  ? "Lexicon found no keyword match; Local ONNX and HF both unavailable/timed out, using lexicon default"
+                  : "Lexicon found no keyword match; Local ONNX and HF both unavailable (no token or error), using lexicon default",
+            };
+  const textPrimary =
+    textSelection.engine === "local_onnx" && localOnnxResult.signal
+      ? localOnnxResult.signal
+      : textSelection.engine === "hf" && hfResult.signal
+        ? hfResult.signal
+        : lexiconResult;
   const final = fuseEmotion(textPrimary, audioSignal);
 
   return {
@@ -227,6 +288,7 @@ export async function runDiagnosticEmotion(
     lexicon,
     localOnnx,
     acoustic,
+    acousticMl,
     fusion: { textSelection, final },
     totalLatencyMs: performance.now() - start,
   };

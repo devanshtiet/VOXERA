@@ -14,6 +14,8 @@ const TurnSchema = z.object({
   sttConfidence: z.number().min(0).max(1).optional(),
   /** Opt into the full per-engine emotion diagnostic breakdown for this call only (used by the demo dashboard). */
   diagnostics: z.boolean().optional(),
+  /** Manual acoustic-engine calibration knob (-1..1) — see TurnInput's doc in lib/agent/orchestrator.ts. */
+  sensitivityBias: z.number().min(-1).max(1).optional(),
   /** Agent Builder agent id — when set, overrides clientId with the agent's own tenant and injects its custom prompt. */
   agentId: z.string().min(1).optional(),
 });
