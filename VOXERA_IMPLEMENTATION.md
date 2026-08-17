@@ -923,3 +923,87 @@ explicit ask. Billing can be wired up separately if wanted.
   middleware, unaffected by this change). Could not visually exercise the wizard itself or a real
   create-agent submission — this sandbox has no reachable Supabase connection to log in, same
   limitation as the Agent Builder work.
+
+### 2026-08-17 — Session Not Surviving to a New Tab (Middleware Coverage Gap)
+
+**Objective**: Reported live: log in, open a new tab to the same site (same browser, same URL), get
+bounced back to `/login` even though nothing logged the user out.
+
+**Root Cause**: `middleware.ts`'s matcher only ran on `/admin/:path*` and `/onboarding/:path*`.
+Supabase's session-refresh call (`getUser()` — not `getSession()`, which deliberately makes a round
+trip and transparently renews an expired access token via the refresh-token cookie) only happened
+inside that same middleware. The access token was never refreshed while browsing any other page
+(`/`, `/demo`, `/login`, `/signup`), so it could silently expire, and by the time a protected page was
+opened in a new tab there was nothing valid left to authenticate with.
+
+**Changes Implemented**:
+- `updateSession()` (`lib/db/middleware.ts`) now always calls `getUser()` to refresh the session
+  cookie, but only redirects to `/login` when the request path actually falls under `/admin` or
+  `/onboarding` — separating "keep the session alive" from "require login for this route."
+- `middleware.ts`'s matcher widened to run on nearly every page route, excluding `/api` (an extra
+  Supabase Auth round trip on every voice-turn API call would add real latency to a live phone
+  conversation) and static assets.
+
+**Files Modified**: `lib/db/middleware.ts`, `middleware.ts`
+
+**Files Created**: `__tests__/db/middleware.test.ts` — 8 tests covering protected-route redirects,
+public-route pass-through, prefix-matching precision (`/adminish` isn't treated as protected), and
+that `getUser()` still runs (refreshing the session) on public routes.
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (304 passing), `npm run build` — all clean
+- Live-verified: `/`, `/demo`, `/login` return 200; `/admin`, `/onboarding` still 307-redirect to
+  `/login`; `/api/agents` still returns 200 untouched by the auth check; a live `/api/turn` call
+  confirmed no added latency on the API path. Could not reproduce the original bug live end-to-end
+  (log in, wait for expiry, open new tab) — no reachable Supabase connection in this sandbox to
+  actually authenticate.
+
+### 2026-08-17 — PDF Upload 500 Error + Consolidated, Idempotent SQL Migration
+
+**Objective**: Two errors reported live from the onboarding wizard's Knowledge step: uploading a PDF
+returned a 500, and creating the agent failed with `Could not find the table 'public.tenants' in the
+schema cache`. After the tenants fix, PDF upload was still failing, revealing a second, unrelated gap.
+
+**Changes Implemented**:
+1. **PDF upload 500 (real code bug)**: `pdf-parse` is pinned to `^2.4.5`, which completely rewrote the
+   package's API — v1 exported a callable function (`pdfParse(buffer)`), which
+   `lib/knowledge/ingest.ts`'s `extractPdfText()` was still calling. v2 has no default export at all;
+   it's a `PDFParse` class (`new PDFParse({ data }).getText()`). Calling the module namespace as a
+   function threw a generic "is not a function" on every PDF upload. Rewrote `extractPdfText()` to
+   the v2 class API with `parser.destroy()` cleanup. Verified with a real generated PDF via a
+   standalone script — extracts text correctly now.
+2. **Clearer error for missing schema**: `createFirstAgent()` (`lib/db/onboarding.ts`) now recognizes
+   PostgREST's `PGRST205` error code (table not found) and appends a concrete hint instead of
+   surfacing a bare passthrough error.
+3. **`sql/migration_consolidated.sql`** — one idempotent file merging `migration.sql` through
+   `migration_v11.sql`, requested directly after the user hit missing-table errors from having only
+   partially applied the 11 separate files (`tenants` migrated but not `knowledge_documents`, a
+   completely different file). Every `CREATE TABLE` uses `IF NOT EXISTS`; every incrementally-added
+   column uses `ALTER TABLE ADD COLUMN IF NOT EXISTS`; every `CREATE POLICY` is preceded by
+   `DROP POLICY IF EXISTS` (Postgres has no `CREATE POLICY IF NOT EXISTS`). Deliberately drops the
+   original `migration.sql`'s `DROP TABLE IF EXISTS public.memories CASCADE` — destructive and wrong
+   for a script meant to be safely re-run against a database that may already hold real data; creates
+   `IF NOT EXISTS` instead. Fixed `migration_v10.sql`'s `subscriptions` table, which had no
+   `IF NOT EXISTS` guard in the original. Tables ordered by FK dependency; ends with a sanity-check
+   query listing which of the 11 expected tables exist.
+4. **Follow-up fix**: running the consolidated file hit a real Postgres error —
+   `cannot change return type of existing function` on `match_memories`, because Postgres derives a
+   function's row type from its `RETURNS TABLE` columns (treated as OUT parameters) and refuses to
+   change that shape via `CREATE OR REPLACE`. `migration_v9.sql` grew those columns
+   (`importance_score`/`retrieval_count`/`last_retrieved_at`), so it collided with any pre-v9 version
+   already applied. Added `DROP FUNCTION IF EXISTS match_memories(vector, double precision, integer,
+   text, text, text)` immediately before the `CREATE OR REPLACE`, exactly matching Postgres's own
+   error hint.
+
+**Files Created**: `sql/migration_consolidated.sql`
+
+**Files Modified**: `lib/knowledge/ingest.ts`, `lib/db/onboarding.ts`, `__tests__/db/onboarding.test.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (305 passing), `npm run build` — all clean
+- PDF fix live-verified with a real generated PDF through the actual `pdf-parse` v2 API
+- `sql/migration_consolidated.sql` verified with `pglast` (a real libpg_query-based PostgreSQL
+  parser — the same parser Postgres itself uses): all 80 statements parse as valid syntax. Could not
+  execute it against a real database from this sandbox — the user ran it live, hit the
+  `match_memories` return-type error, which was then fixed and the file re-verified; full successful
+  execution end-to-end still needs final confirmation from the user's own environment.
