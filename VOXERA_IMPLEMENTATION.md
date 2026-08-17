@@ -2034,3 +2034,75 @@ correct, but the actual LLM-reply/TTS-back-to-caller experience can only be conf
 this session cannot place itself.
 
 **Files Modified**: `package.json` (`dev:full` script), `custom-server.ts`
+
+### 2026-08-18 — `custom-server.ts` Was Also Destroying Next's Own HMR WebSocket
+
+**Objective**: User reported the browser console filling with repeated `WebSocket connection to
+'ws://localhost:3000/_next/hmr?id=...' failed` while running `npm run dev:full`, and the admin
+dashboard stuck on "Loading analytics..." indefinitely.
+
+**Root cause**: `custom-server.ts`'s `'upgrade'` handler special-cased `/api/telephony/stream` and
+called `socket.destroy()` on every other upgrade request — a leftover from when the only known
+consumer of raw WS upgrades was Twilio. Next's own dev-mode Hot Module Reload client *also* opens a
+WebSocket (`/_next/hmr`) to receive live-reload notifications, and that request has the exact same
+generic shape as any other upgrade — this handler destroyed it identically to a stray connection,
+silently breaking HMR for the entire dev session (no live-reload on file changes, and the constant
+failed-reconnect loop is a plausible contributor to the stuck "Loading analytics..." state the user
+also saw, though that specific symptom wasn't independently reproduced from this sandbox — a different
+browser session than the user's own, with its own auth cookie).
+
+**Fix**: delegate anything that isn't `/api/telephony/stream` to Next's own
+`app.getUpgradeHandler()` (stable public API since Next 13's custom-server support) instead of
+destroying the socket. Verified both paths now work from the same running server: no HMR WebSocket
+errors in a fresh browser console, and the Twilio media-stream WS still opens correctly
+(`ws.on("open")` fires) — confirming the fix didn't regress the original reason `custom-server.ts`
+exists.
+
+**Files Modified**: `custom-server.ts`
+
+### 2026-08-18, later — Agent Went Completely Silent Mid-Call: Tool-Call Loop Could Exhaust Without a Reply
+
+**Objective**: User reported a real call that no longer cut off, but the agent never spoke at all after
+connecting — "say let me connect then nothing is working."
+
+**Investigation, not guessing**: `call_logs.sessionId` was `null` across the user's last several real
+calls despite durations up to 182s, which is set right after the media-stream handler's `init()`
+reaches its DB write — so something upstream looked broken. Restarted the dev server under this
+session's own tracking (it had drifted to an untracked process again, so its logs weren't visible) and
+replayed a synthetic Twilio-shaped WebSocket session against it: this time `sessionId` populated
+correctly (`tel-DZpR8jWksqFA`) and Deepgram connected cleanly — strong evidence the `null` rows were
+from a stale server instance, not a live code defect in that path.
+
+Moved on to testing the reply-generation path directly (`handleTurn()` with a canned transcript,
+bypassing STT) since a silent-but-connected call is equally consistent with a broken reply step. Found
+the real bug immediately: `handleTurn("Hi, I would like to book a table for two people tomorrow
+evening.")` returned `output.reply === ""` — logged as `"[LLM] Success via provider: zenmux"`, no error
+anywhere, just genuinely empty text. Re-ran the same booking-completion prompt three times in a row to
+confirm it wasn't a fluke; one of the three reproduced it again (`"Tool-call loop exhausted without a
+final reply"`), the other two didn't — non-deterministic, which is exactly why it would show up as an
+intermittent "sometimes the agent just doesn't say anything" rather than every call.
+
+**Root cause** (`lib/agent/llm.ts`'s `generateReply`): the tool-calling loop runs at most 3 iterations;
+`finalResponseText` is only ever assigned inside the *plain-content* branch (no `tool_calls` on the
+response). If the model makes a tool call on all 3 iterations in a row — plausible for a booking
+request that needs `check_availability` then `create_booking`, sometimes a third confirmation-shaped
+call — the loop exits having never taken that branch, and the function returns with
+`finalResponseText` still at its initial `""`. Nothing downstream treats an empty string as an error:
+`TelephonyStreamHandler.speakToTwilio("")` just synthesizes and "speaks" nothing, so the call sits
+connected in total silence — the caller's own description, precisely.
+
+**Fix**: after the loop, if `finalResponseText` is still empty, force one more `chat.completions.create`
+call with `tools` omitted so the model is structurally unable to call another tool and must produce
+natural-language text summarizing what it just did. Added a hardcoded one-line floor below even that
+("Sorry, I just want to double check that...") in case a second LLM call somehow also returns empty —
+a live phone call going fully silent is bad enough to warrant a floor that doesn't depend on trusting
+the model twice in a row.
+
+**Verified, not just patched**: re-ran the exact reproduction (`handleTurn` with the same booking
+prompt, several times) after the fix — the exhaustion path fired again on one run (confirming the fix's
+code path is real, not dead code) and this time returned "Perfect — table for two at 7pm tomorrow,
+under Smith. You're all set!" instead of empty text. `npx tsc --noEmit`, `npm run lint`, `npx vitest
+run` (316 passing), `npm run build` all clean. Cleaned up all synthetic `session_logs`/diagnostic rows
+created during this investigation.
+
+**Files Modified**: `lib/agent/llm.ts`
