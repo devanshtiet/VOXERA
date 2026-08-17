@@ -8,17 +8,20 @@ This document outlines the remaining tasks, technical debt, security enhancement
 
 VOXERA has a robust core foundation: real-time telephony streaming, custom WebSockets, dynamic emotion adaptation prompt coaching, Supabase vector databases, transactional booking safety, and custom lightweight SVG dashboard reporting. 
 
-Recent engineering work has hardened the emotion engine (expanded from 9 to 11 labels with 35+ lexicon entries and context-aware detection), introduced a Supabase circuit breaker and timeout layer to prevent cascading failures, and parallelized the AI orchestrator pipeline to eliminate ~25 seconds of unnecessary latency.
+Recent engineering work has hardened the emotion engine (expanded from 9 to 11 labels with 35+ lexicon entries and context-aware detection, plus fixes for a real acoustic "sadness bias" and a text-lexicon negation blindness bug), introduced a Supabase circuit breaker and timeout layer to prevent cascading failures, and parallelized the AI orchestrator pipeline to eliminate ~25 seconds of unnecessary latency.
 
-The next phases of development will transition the codebase from a highly complete MVP into a hardened, secure, and commercially scalable SaaS platform. Near-term work focuses on security hardening (RLS, token encryption) and replacing audio heuristics with physical acoustic DSP metrics. Medium and long-term milestones describe self-serve multi-tenant onboarding, billing integrations, and multi-agent template builder workflows.
+The most recent phase delivered the multi-agent template builder this document previously listed only as a future milestone: accounts can now create multiple named voice agents, each with its own system prompt (written manually or AI-drafted from a description), greeting, and voice, storable and independently testable/callable — plus a resilient LLM routing layer (ZenMux primary, existing Groq key-rotation as automatic fallback) and a simplified onboarding flow that creates a real agent instead of a disconnected business-profile form.
+
+The next phases of development will transition the codebase from a highly complete MVP into a hardened, secure, and commercially scalable SaaS platform. Near-term work focuses on security hardening (RLS, token encryption) and replacing audio heuristics with physical acoustic DSP metrics. Medium and long-term milestones describe billing re-integration into the new agent-creation flow, per-agent knowledge base isolation, and further explainability tooling for evaluators.
 
 ---
 
 ## 2. Current Project Completion
 
-* **Core MVP Feature Set**: **92%**
-* **SaaS Infrastructure & Billing**: **5%**
-* **Overall Platform Readiness**: **68%**
+* **Core MVP Feature Set**: **94%**
+* **Multi-Agent Builder Platform**: **90%**
+* **SaaS Infrastructure & Billing**: **5%** (unchanged — billing was deliberately decoupled from the new onboarding flow, see §4.6)
+* **Overall Platform Readiness**: **72%**
 
 ---
 
@@ -28,15 +31,17 @@ The next phases of development will transition the codebase from a highly comple
 | :--- | :--- | :--- | :--- | :--- |
 | **Multi-Tenant Isolation** | 🟢 Complete | High | 100% | RLS policies implemented using auth.uid(). |
 | **Telephony & WebSockets** | 🟢 Complete | Medium | 100% | Queue is now backed by Redis sorted sets; fully scaled via Pub/Sub. |
-| **Speech Emotion (SER)** | 🟢 Complete (Phase 1) | Medium | 100% | Concurrent HF+Lexicon architecture, scored acoustic inference (crying/laughter detection), confidence-aware fusion, and full diagnostic instrumentation (per-engine comparison, diagnostic CLI) all verified. Local ONNX engine added (diagnostic-only). Final fusion/model-selection architecture is Phase 2. |
+| **Speech Emotion (SER)** | 🟢 Complete (Phase 1) | Medium | 100% | Concurrent HF+Lexicon architecture, scored acoustic inference (crying/laughter detection), confidence-aware fusion, and full diagnostic instrumentation (per-engine comparison, diagnostic CLI) all verified. Local ONNX engine added (diagnostic-only). Fixed a real acoustic "sadness bias" (calm/neutral/positive speech was defaulting to sadness) and a text-lexicon negation-blindness bug ("not feeling good" scoring as joy). Final fusion/model-selection architecture is Phase 2. |
 | **Memory (Vector Store)** | 🟢 Complete | High | 100% | Circuit breaker, compound indexes, and adaptive importance decay with chronological explainability. |
 | **Knowledge Base (RAG)** | 🟢 Complete | High | 95% | Cascading deletion, status polling, and version superseding are stable. |
 | **Booking & Integrations** | 🟢 Complete | High | 100% | Advisory locks, calendar JWT sync, and AES-256 credential encryption are stable. |
 | **Analytics Dashboard** | 🟢 Complete | Low | 95% | Lightweight SVG graphs and tool invocation logging are fully integrated. |
 | **Acoustic CAI Processing**| 🟢 Complete | Medium | 95% | Real DSP extraction (pitch, energy, ZCR, pauses) from PCM. Barge-in uses energy thresholds. |
-| **AI Orchestrator** | ✅ Stable | High | 95% | Parallelized pipeline, fire-and-forget logging. Latency reduced from ~29s to ~3-5s. |
+| **AI Orchestrator** | ✅ Stable | High | 95% | Parallelized pipeline, fire-and-forget logging. Latency reduced from ~29s to ~3-5s. LLM calls route through a provider fallback chain — ZenMux (primary) → Groq (key-rotated) → OpenAI — via one ordered config array, no per-provider code paths. |
 | **Supabase Resilience** | 🟢 Complete | High | 100% | Circuit breaker, timeout fetch, graceful degradation. |
-| **SaaS Builder & Billing**| 🟢 Complete | High | 100% | Stripe subscription gates and self-serve onboarding wizard are built and integrated. |
+| **Multi-Agent Builder** | 🟢 Complete | High | 90% | Accounts can create multiple named agents (`/admin/agents`), each with its own system prompt (manual or AI-drafted), greeting, and voice — stored, individually testable in the live drawer, and callable. Custom prompts are real-injected into the LLM context, layered on top of (never overriding) core safety/escalation rules. Gap: all agents under one account still share one knowledge base — see §4.6. |
+| **Voice Agent Onboarding** | 🟢 Complete | Medium | 100% | Simplified to a 4-step flow (describe → write/AI-generate prompt → optional file upload → create) that creates a real agent, replacing a prior wizard that wrote to a disconnected business-profile form. Billing step deliberately removed — see §4.6. |
+| **SaaS Builder & Billing**| 🟡 Partial | High | 70% | Stripe subscription checkout/webhook routes exist and are wired to the `subscriptions` table, but are no longer invoked from onboarding after its redesign — re-integration (e.g. gating agent count by plan) is not yet built. |
 
 ---
 
@@ -68,14 +73,44 @@ The next phases of development will transition the codebase from a highly comple
 * **Roadmap Priority**: **Completed (Issue #12)**
 
 ### 4.6 Self-Serve SaaS Builder & Stripe Billing
-* **Current State**: VOXERA is configured for single-tenant operations with default credentials.
-* **Future Features (From SaaS Blueprint)**:
-  - **Onboarding Wizard**: Self-serve forms allowing new business admins to describe their business, configure voice personas, and write custom greetings.
-  - **Billing Integrations**: Gate agent activation and document limits behind Stripe subscriptions (e.g., Starter, Growth, Enterprise plans).
-  - **Super-Admin Panel**: Global dashboard for platform maintainers to monitor system health, tenant limits, active integrations, and payment states.
-* **Estimated Complexity**: High
+* **Current State**: The self-serve onboarding wizard (`/onboarding`) is built and creates a real
+  agent: business description → write-or-AI-generate the system prompt → optional knowledge-base
+  file upload → create. Stripe checkout/webhook routes and the `subscriptions` table exist and work
+  in isolation, but the redesigned onboarding no longer calls into them — the
+  prior wizard's plan-picker step was removed as part of simplifying onboarding down to "describe your
+  agent and create it," and billing was not yet re-integrated into the new flow.
+* **Future Features**:
+  - **Billing re-integration**: gate agent count / knowledge-doc limits / call volume behind Stripe
+    subscription tiers (Starter, Growth, Enterprise) from within Agent Builder or account settings,
+    now that agent creation itself lives outside the old wizard.
+  - **Per-agent knowledge base isolation**: today every agent under one account shares that account's
+    entire `LTM_client` knowledge base (by `clientId`); scoping specific uploaded documents to
+    specific agents is not yet built.
+  - **Super-Admin Panel**: Global dashboard for platform maintainers to monitor system health, tenant
+    limits, active integrations, and payment states.
+* **Estimated Complexity**: Medium (billing re-integration) / High (per-agent knowledge isolation)
 * **Expected Engineering Impact**: Enables commercial monetization of the platform.
 * **Roadmap Priority**: **Long-Term**
+
+### 4.7 Multi-Agent Builder & Prompt Injection
+* **Current State**: **Completed.** An account can create multiple named agents (`agents` table,
+  `sql/migration_v11.sql` added `description`/`system_prompt`/`greeting`/`voice_persona`), each with
+  a real, custom system prompt — written manually or drafted by the platform's own LLM from a short
+  description (`/api/onboarding/generate-prompt`). The prompt is genuinely injected into
+  `buildLLMContext()` as its own block, additive to (never overriding) the platform's core rules and
+  emotion-aware persona, so safety/escalation behavior can't be prompted away by an agent's creator.
+  Any agent can be selected in the live test drawer or, once wired to a phone number, placed on a
+  real call.
+* **Known limitation**: shared knowledge base per account rather than per agent (see §4.6).
+* **Roadmap Priority**: **Completed**
+
+### 4.8 LLM Provider Resilience
+* **Current State**: **Completed.** LLM calls try ZenMux first, then fall back automatically to the
+  existing Groq key-rotation setup, then OpenAI — one ordered array in `CONFIG.llm.providers`
+  (`lib/config.ts`), no duplicate call paths. `KeyRotator` (`lib/util/keys.ts`) is generic over any
+  comma-separated env var, so every provider in the chain gets multi-key rotation, timeouts, and
+  exponential backoff on 429/5xx for free.
+* **Roadmap Priority**: **Completed**
 
 ---
 
@@ -99,10 +134,17 @@ The next phases of development will transition the codebase from a highly comple
 * [x] Implement adaptive memory importance scoring, time-decay, and retrieval explainability. (Issue #9/17)
 * [x] Integrate a trained ML emotion model (HuggingFace DistilRoBERTa) alongside the lexicon via a concurrent `detectTextEmotion()` router (`detectTextEmotionHF` + `detectTextEmotionLexicon`), with confidence-aware fusion. (Issue #26/#29)
 * [x] **Emotion Engine Phase 1 — Diagnostics & Acoustic Upgrade**: Per-engine diagnostic comparison (HF/Lexicon/Local-ONNX/Acoustic) with diagnostic CLI; scored multi-feature acoustic inference with crying/laughter detection; new local ONNX emotion engine (diagnostic-only). (Issues #26–#31)
+* [x] **Live-testing bug fixes from real voice calls**: fixed the acoustic engine's "sadness bias" (calm/neutral/positive speech defaulting to sadness), a text-lexicon negation-blindness bug ("not feeling good" scoring as joy), a small-talk misclassification ("How are you?" reading as confusion), and the agent replying before the caller finished a sentence (Deepgram `endpointing` was unset, using an overly short default).
+* [x] **Root-caused and fixed a leaking support-ticket escalation phrase** ("connect you with a senior specialist") that survived multiple prompt-level fixes — the actual source was a separate output-guard layer (`guardOutput()`) re-injecting it after the LLM/persona layer had already been fixed.
+* [x] **Six judge/evaluator-facing demo features**: engine-disagreement callout, scrubbable per-turn reasoning trace, visible retrieved-memory content, real per-stage pipeline latency, one-click scripted test scenarios, and a live session scorecard.
 
 ### 5.3 Phase III: SaaS Portal (Weeks 6 - 10)
 * [x] Build Stripe subscription hooks and checkout routes.
-* [x] Develop the admin onboarding registration wizard.
+* [x] Develop the admin onboarding registration wizard. *(Superseded — see below: redesigned into a simpler agent-creation flow that no longer includes the billing step.)*
+* [x] **Multi-Agent Builder**: accounts can create multiple named voice agents, each with its own system prompt (manual or AI-generated), greeting, and voice — storable, individually testable, and callable.
+* [x] **Onboarding redesign**: replaced the disconnected business-profile wizard with a 4-step flow (describe → write/AI-generate prompt → optional knowledge upload → create) that creates a real agent via the Multi-Agent Builder.
+* [x] **LLM provider resilience**: ZenMux added as the primary LLM provider ahead of the existing Groq key-rotation fallback, one ordered config array, no duplicate call paths.
+* [ ] Re-integrate Stripe billing into the redesigned onboarding/Agent Builder flow (plan-gated agent count, knowledge-doc limits).
 * [ ] Implement Super-Admin usage and monitoring panels.
 
 ### 5.4 Phase IV: Production & AWS Deployment (Weeks 11+)
