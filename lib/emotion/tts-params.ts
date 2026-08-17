@@ -7,6 +7,11 @@ export interface TTSProsodyParams {
 }
 
 const PROSODY_MAP: Record<EmotionLabel, TTSProsodyParams> = {
+  calm: {
+    speed: 0.95,
+    pauseStrategy: "subtle",
+    pitchHint: "neutral",
+  },
   anger: {
     speed: 0.85,
     pauseStrategy: "subtle",

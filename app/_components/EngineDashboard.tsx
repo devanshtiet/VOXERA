@@ -17,6 +17,14 @@ interface EngineDiagnostic {
   importance: number | null;
   memoryClassification: string | null;
   unavailableReason?: string;
+  /** Acoustic-only: raw physical DSP metrics the label was derived from. */
+  rawMetrics?: {
+    pitchHz: number;
+    rmsEnergy: number;
+    zeroCrossingRate: number;
+    speakingRateWPM: number;
+    decibels?: number;
+  } | null;
 }
 
 export interface DiagnosticEmotionResult {
@@ -153,6 +161,62 @@ function EngineCard({ engineKey, d }: { engineKey: keyof typeof ENGINE_META; d: 
   );
 }
 
+/** Acoustic-only card — extends the standard EngineCard layout with a row of
+ * the individual raw DSP metrics (pitch, energy/volume, ZCR, speaking rate)
+ * the label was actually derived from, instead of just the mapped label. */
+function AcousticEngineCard({ d }: { d: EngineDiagnostic | null }) {
+  if (!d) {
+    return (
+      <div className="rounded-xl border border-dashed border-[var(--console-border)] p-3.5 flex flex-col items-center justify-center text-center gap-1.5 min-h-[92px]">
+        <span className="text-[var(--console-text-dim)]">{ENGINE_META.acoustic.icon}</span>
+        <div className="text-[9.5px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">Acoustic</div>
+        <div className="text-[10px] text-[var(--console-text-dim)]">no audio input</div>
+      </div>
+    );
+  }
+  const metrics = d.rawMetrics;
+  return (
+    <div className={`rounded-xl border p-3.5 transition-colors ${engineColor(d.available, d.timedOut)}`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 text-[var(--console-text-dim)]">
+          {ENGINE_META.acoustic.icon}
+          <span className="text-[9.5px] font-mono uppercase tracking-widest">Acoustic</span>
+        </div>
+        <span className={`w-1.5 h-1.5 rounded-full ${d.available ? "bg-[var(--console-cyan)] animate-pulse" : "bg-[var(--console-text-dim)]"}`} />
+      </div>
+      {d.available ? (
+        <>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[15px] font-bold capitalize text-[var(--console-text)] leading-tight">{d.label}</span>
+            {d.confidence !== null && (
+              <span className="text-[10.5px] text-[var(--console-text-dim)]">{(d.confidence * 100).toFixed(0)}% conf</span>
+            )}
+          </div>
+          {metrics && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1.5 mt-2.5 pt-2.5 border-t border-[var(--console-border)]">
+              <MetricReadout label="Pitch" value={`${metrics.pitchHz.toFixed(0)}Hz`} />
+              <MetricReadout label="Volume" value={metrics.decibels !== undefined ? `${metrics.decibels.toFixed(0)}dB` : metrics.rmsEnergy.toFixed(0)} />
+              <MetricReadout label="ZCR" value={metrics.zeroCrossingRate.toFixed(2)} />
+              <MetricReadout label="Rate" value={`${metrics.speakingRateWPM.toFixed(0)}wpm`} />
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-[11px] text-[var(--console-text-dim)] leading-snug">{d.unavailableReason ?? "unavailable"}</div>
+      )}
+    </div>
+  );
+}
+
+function MetricReadout({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[8.5px] font-mono uppercase tracking-widest text-[var(--console-text-dim)]">{label}</span>
+      <span className="text-[11.5px] font-mono text-[var(--console-text)]">{value}</span>
+    </div>
+  );
+}
+
 /** Surfaces whether HF/Lexicon/Local ONNX actually agreed on this turn,
  * instead of only ever showing the winner — proof the fusion decision isn't
  * hand-waved, and the single most convincing thing to point a judge at. */
@@ -213,14 +277,22 @@ export function EngineDiagnosticPanel({
    */
   compact?: boolean;
 }) {
-  const gridCols = compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4";
+  const textGridCols = compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-3";
   if (!diagnostics) {
     return (
-      <div className={`grid ${gridCols} gap-2.5`}>
-        <EngineCard engineKey="hf" d={null} />
-        <EngineCard engineKey="lexicon" d={null} />
-        <EngineCard engineKey="local_onnx" d={null} />
-        <EngineCard engineKey="acoustic" d={null} />
+      <div className="flex flex-col gap-4">
+        <div>
+          <div className="voxera-console-label text-[10px] font-bold mb-2">Text Engine Division</div>
+          <div className={`grid ${textGridCols} gap-2.5`}>
+            <EngineCard engineKey="hf" d={null} />
+            <EngineCard engineKey="lexicon" d={null} />
+            <EngineCard engineKey="local_onnx" d={null} />
+          </div>
+        </div>
+        <div>
+          <div className="voxera-console-label text-[10px] font-bold mb-2">Acoustic Engine Division</div>
+          <AcousticEngineCard d={null} />
+        </div>
       </div>
     );
   }
@@ -229,14 +301,24 @@ export function EngineDiagnosticPanel({
     <div className="flex flex-col gap-4">
       <EngineAgreementCallout diagnostics={diagnostics} />
 
-      {/* Both HF and Lexicon (plus Local ONNX and Acoustic) stay visible here
-          regardless of which one was selected below — comparing engines is
-          the point of this panel, not just showing the winner. */}
-      <div className={`grid ${gridCols} gap-2.5`}>
-        <EngineCard engineKey="hf" d={diagnostics.hf} />
-        <EngineCard engineKey="lexicon" d={diagnostics.lexicon} />
-        <EngineCard engineKey="local_onnx" d={diagnostics.localOnnx} />
-        <EngineCard engineKey="acoustic" d={diagnostics.acoustic} />
+      {/* Split into two divisions per Ticket 4 — text-semantic engines
+          (HF/Lexicon/Local ONNX, which classify the transcript) and the
+          acoustic engine (which classifies the audio itself) are different
+          kinds of signal and were confusingly grouped into one undivided
+          grid before. All three text engines still stay visible regardless
+          of which one was selected below — comparing engines is the point
+          of this panel, not just showing the winner. */}
+      <div>
+        <div className="voxera-console-label text-[10px] font-bold mb-2">Text Engine Division</div>
+        <div className={`grid ${textGridCols} gap-2.5`}>
+          <EngineCard engineKey="hf" d={diagnostics.hf} />
+          <EngineCard engineKey="lexicon" d={diagnostics.lexicon} />
+          <EngineCard engineKey="local_onnx" d={diagnostics.localOnnx} />
+        </div>
+      </div>
+      <div>
+        <div className="voxera-console-label text-[10px] font-bold mb-2">Acoustic Engine Division</div>
+        <AcousticEngineCard d={diagnostics.acoustic} />
       </div>
 
       <div>
@@ -268,7 +350,7 @@ const EMOTION_COLOR: Record<string, string> = {
   anger: "bg-red-500", frustration: "bg-red-400", distress: "bg-red-600",
   sadness: "bg-blue-400", disappointment: "bg-blue-300", fear: "bg-amber-500", confusion: "bg-amber-400",
   joy: "bg-emerald-500", gratitude: "bg-emerald-400", excitement: "bg-emerald-600",
-  neutral: "bg-[var(--color-text-muted)]",
+  neutral: "bg-[var(--color-text-muted)]", calm: "bg-sky-400",
 };
 
 export function EmotionTimeline({ history }: { history: EmotionHistoryPoint[] }) {

@@ -290,11 +290,34 @@ CREATE TABLE IF NOT EXISTS public.memories (
 
 -- Patches for tables created before these columns existed (migration_v4.sql,
 -- migration_v9.sql) — no-op if the table was just created fresh above.
+-- IMPORTANT: CREATE TABLE IF NOT EXISTS above is a full no-op on a DB where
+-- `memories` already exists under the original migration.sql schema (id,
+-- tier, userId, clientId, text, embedding, metadata, createdAt, documentId,
+-- importance_score, retrieval_count, last_retrieved_at only) — every column
+-- below that isn't explicitly patched here silently never gets added, and
+-- every write that sets it (lib/memory/store.ts's toRow()) then fails with
+-- "Could not find the '<col>' column of 'memories' in the schema cache",
+-- caught and only console.error'd by vectorStore.put() — so this list must
+-- stay complete, not just the columns any one feature happened to need.
 ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS "documentId" text
     REFERENCES public.knowledge_documents(id) ON DELETE CASCADE;
 ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS importance_score real NOT NULL DEFAULT 0.5;
 ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS retrieval_count integer NOT NULL DEFAULT 0;
 ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS last_retrieved_at bigint;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS ts bigint NOT NULL DEFAULT (extract(epoch from now()) * 1000)::bigint;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS summary text NOT NULL DEFAULT '';
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS entities text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS topic text NOT NULL DEFAULT 'general';
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS emotion text NOT NULL DEFAULT 'neutral';
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS vad_v real NOT NULL DEFAULT 0;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS vad_a real NOT NULL DEFAULT 0;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS vad_d real NOT NULL DEFAULT 0;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS intensity real NOT NULL DEFAULT 0;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS importance real NOT NULL DEFAULT 0.5;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS "sourceUtteranceIds" text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS recurrence integer NOT NULL DEFAULT 1;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS resolved boolean NOT NULL DEFAULT false;
+ALTER TABLE public.memories ADD COLUMN IF NOT EXISTS ttl bigint;
 
 CREATE INDEX IF NOT EXISTS idx_memories_tier_client ON public.memories (tier, "clientId");
 CREATE INDEX IF NOT EXISTS idx_memories_user ON public.memories ("userId");

@@ -2,6 +2,7 @@ export type Role = "user" | "agent" | "system";
 
 export type EmotionLabel =
   | "neutral"
+  | "calm"
   | "frustration"
   | "anger"
   | "sadness"

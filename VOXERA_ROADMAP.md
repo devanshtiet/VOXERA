@@ -4,6 +4,30 @@ This document outlines the remaining tasks, technical debt, security enhancement
 
 ---
 
+## 0. ✅ Resolved — Live Database Schema Fix (was: Action Required)
+
+The production Supabase `memories` table was missing 14 columns (`emotion`, `vad_v/a/d`, `topic`, `ts`,
+`summary`, `entities`, `importance`, `sourceUtteranceIds`, `recurrence`, `resolved`, `ttl`) that
+`lib/memory/store.ts` writes to on every memory/knowledge-base save. `sql/migration_consolidated.sql`'s
+`CREATE TABLE IF NOT EXISTS public.memories` is a full no-op against an existing table, and its old
+patch section only backfilled 4 of these 14 columns — so every single vector-store write had been
+silently failing since the DB predated the consolidated migration (`vectorStore.put()` logs the error
+to console but never throws, so callers believed the write succeeded). This affected **all**
+memory/emotion persistence and the knowledge-base RAG pipeline, not just the new file-format work
+below.
+
+**Fixed on 2026-08-17**: connected directly to the production Postgres instance (via the Supabase
+Supavisor transaction pooler — the direct-connection host is IPv6-only and didn't resolve from this
+environment) and ran the corrected `ADD COLUMN IF NOT EXISTS` patch. Verified before/after via
+`information_schema.columns`: all 14 columns now present. Re-ran a full `ingestDocument()` →
+`queryKnowledgeBase()` round trip against production immediately after — no more
+`[VectorStore] Put Error]`, and the retrieved chunk matched what was written. Test rows cleaned up
+afterward. `sql/migration_consolidated.sql` now has the complete column list for any future
+environment (staging, a fresh clone) that needs the same patch applied. See the 2026-08-17 entry in
+`VOXERA_IMPLEMENTATION.md` for how this was found and fixed.
+
+---
+
 ## 1. Executive Summary
 
 VOXERA has a robust core foundation: real-time telephony streaming, custom WebSockets, dynamic emotion adaptation prompt coaching, Supabase vector databases, transactional booking safety, and custom lightweight SVG dashboard reporting. 
@@ -31,12 +55,12 @@ The next phases of development will transition the codebase from a highly comple
 | :--- | :--- | :--- | :--- | :--- |
 | **Multi-Tenant Isolation** | 🟢 Complete | High | 100% | RLS policies implemented using auth.uid(). |
 | **Telephony & WebSockets** | 🟢 Complete | Medium | 100% | Queue is now backed by Redis sorted sets; fully scaled via Pub/Sub. |
-| **Speech Emotion (SER)** | 🟢 Complete (Phase 1) | Medium | 100% | Concurrent HF+Lexicon architecture, scored acoustic inference (crying/laughter detection), confidence-aware fusion, and full diagnostic instrumentation (per-engine comparison, diagnostic CLI) all verified. Local ONNX engine added (diagnostic-only). Fixed a real acoustic "sadness bias" (calm/neutral/positive speech was defaulting to sadness) and a text-lexicon negation-blindness bug ("not feeling good" scoring as joy). Final fusion/model-selection architecture is Phase 2. |
+| **Speech Emotion (SER)** | 🟢 Complete (Phase 2) | Medium | 100% | Concurrent HF+Lexicon architecture, scored acoustic inference (crying/laughter detection), and full diagnostic instrumentation (per-engine comparison, diagnostic CLI) all verified. Local ONNX engine added (diagnostic-only). Fixed a real acoustic "sadness bias" and added a genuine "calm" label bucket (12 labels total) so steady/unhurried speech is actively recognized instead of defaulting to neutral. Fusion (`fuseEmotion()`) is now weighted multi-class — text-heavy 70/30 when text confidence >0.7, acoustic-heavy 40/60 otherwise — not just a flat confidence-margin pick. |
 | **Memory (Vector Store)** | 🟢 Complete | High | 100% | Circuit breaker, compound indexes, and adaptive importance decay with chronological explainability. |
-| **Knowledge Base (RAG)** | 🟢 Complete | High | 95% | Cascading deletion, status polling, and version superseding are stable. |
+| **Knowledge Base (RAG)** | 🟢 Complete | High | 95% | Cascading deletion, status polling, and version superseding are stable. Now accepts TXT/PDF/Markdown/CSV/JSON/DOCX (was TXT/PDF only), with an inline upload/status tab in Agent Builder alongside the standalone `/admin/knowledge` manager. |
 | **Booking & Integrations** | 🟢 Complete | High | 100% | Advisory locks, calendar JWT sync, and AES-256 credential encryption are stable. |
 | **Analytics Dashboard** | 🟢 Complete | Low | 95% | Lightweight SVG graphs and tool invocation logging are fully integrated. |
-| **Acoustic CAI Processing**| 🟢 Complete | Medium | 95% | Real DSP extraction (pitch, energy, ZCR, pauses) from PCM. Barge-in uses energy thresholds. |
+| **Acoustic CAI Processing**| 🟢 Complete | Medium | 95% | Real DSP extraction (pitch, energy, ZCR, pauses) from PCM. Barge-in uses energy thresholds (raised to 800 RMS to reduce false triggers from background noise). Pause-detection noise floor is now actually configurable (was a dead config value shadowed by a hardcoded local constant). |
 | **AI Orchestrator** | ✅ Stable | High | 95% | Parallelized pipeline, fire-and-forget logging. Latency reduced from ~29s to ~3-5s. LLM calls route through a provider fallback chain — ZenMux (primary) → Groq (key-rotated) → OpenAI — via one ordered config array, no per-provider code paths. |
 | **Supabase Resilience** | 🟢 Complete | High | 100% | Circuit breaker, timeout fetch, graceful degradation. |
 | **Multi-Agent Builder** | 🟢 Complete | High | 90% | Accounts can create multiple named agents (`/admin/agents`), each with its own system prompt (manual or AI-drafted), greeting, and voice — stored, individually testable in the live drawer, and callable. Custom prompts are real-injected into the LLM context, layered on top of (never overriding) core safety/escalation rules. Gap: all agents under one account still share one knowledge base — see §4.6. |
@@ -104,6 +128,19 @@ The next phases of development will transition the codebase from a highly comple
 * **Known limitation**: shared knowledge base per account rather than per agent (see §4.6).
 * **Roadmap Priority**: **Completed**
 
+### 4.8a Voice Picker & Knowledge Upload Upgrade (Agent Builder)
+* **Current State**: **Completed.** The Persona tab's voice picker replaced 4 fixed buttons with a
+  searchable/filterable catalog of all 40 Deepgram Aura-2 voices (`lib/deepgram/voices.ts`, filter by
+  gender/accent, free-text search over name/trait/accent) plus an inline play-to-preview button per
+  voice (`/api/tts`). `lib/deepgram/tts.ts` now resolves `voice_persona` as either a direct Deepgram
+  model id (`aura-2-*`) or one of the original 4 legacy keys, so no migration or new `agents` column
+  was needed — `voice_persona` stays a free-form string. A new Knowledge tab in Agent Builder lets an
+  account upload/list/delete knowledge documents inline (reusing the existing `/api/knowledge/upload`
+  and `/api/knowledge/documents` routes) without leaving the agent editor. Supported file formats
+  expanded from TXT/PDF only to TXT/PDF/Markdown/CSV/JSON/DOCX (`mammoth` added for DOCX extraction).
+* **Known limitation carried forward**: knowledge is still shared per-account, not per-agent (§4.6).
+* **Roadmap Priority**: **Completed**
+
 ### 4.8 LLM Provider Resilience
 * **Current State**: **Completed.** LLM calls try ZenMux first, then fall back automatically to the
   existing Groq key-rotation setup, then OpenAI — one ordered array in `CONFIG.llm.providers`
@@ -137,6 +174,7 @@ The next phases of development will transition the codebase from a highly comple
 * [x] **Live-testing bug fixes from real voice calls**: fixed the acoustic engine's "sadness bias" (calm/neutral/positive speech defaulting to sadness), a text-lexicon negation-blindness bug ("not feeling good" scoring as joy), a small-talk misclassification ("How are you?" reading as confusion), and the agent replying before the caller finished a sentence (Deepgram `endpointing` was unset, using an overly short default).
 * [x] **Root-caused and fixed a leaking support-ticket escalation phrase** ("connect you with a senior specialist") that survived multiple prompt-level fixes — the actual source was a separate output-guard layer (`guardOutput()`) re-injecting it after the LLM/persona layer had already been fixed.
 * [x] **Six judge/evaluator-facing demo features**: engine-disagreement callout, scrubbable per-turn reasoning trace, visible retrieved-memory content, real per-stage pipeline latency, one-click scripted test scenarios, and a live session scorecard.
+* [x] **Emotion Engine Phase 2 — Weighted Fusion, Calm Bucket, Dashboard Split**: `fuseEmotion()` upgraded from a flat confidence-margin pick to weighted multi-class fusion (text-heavy 70/30 above 0.7 text confidence, acoustic-heavy 40/60 below); added a 12th label (`calm`) with real competing acoustic scoring so steady/unhurried speech is actively recognized rather than defaulting to neutral; further VAD/barge-in calibration (endpointing 500→900ms, barge-in threshold 500→800 RMS) after live testing still showed occasional cut-offs; fixed a dead noise-floor config value that a hardcoded local constant was silently shadowing; split the diagnostic dashboard into separate Text/Acoustic engine divisions and exposed the acoustic engine's raw DSP metrics (pitch, energy/dB, ZCR, rate) instead of just its mapped label.
 
 ### 5.3 Phase III: SaaS Portal (Weeks 6 - 10)
 * [x] Build Stripe subscription hooks and checkout routes.

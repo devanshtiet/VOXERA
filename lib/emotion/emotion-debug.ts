@@ -27,6 +27,15 @@ export interface EngineDiagnostic {
   importance: number | null;
   memoryClassification: MemoryTier | "discarded" | null;
   unavailableReason?: string;
+  /** Acoustic-only: the raw physical DSP metrics the label was derived from
+   * (Ticket 4 — expose individual metrics, not just the mapped label). */
+  rawMetrics?: {
+    pitchHz: number;
+    rmsEnergy: number;
+    zeroCrossingRate: number;
+    speakingRateWPM: number;
+    decibels?: number;
+  } | null;
 }
 
 export interface DiagnosticEmotionResult {
@@ -183,6 +192,13 @@ export async function runDiagnosticEmotion(
         importance: acousticScore.importance,
         memoryClassification: acousticScore.memoryClassification,
         unavailableReason: audioSignal ? undefined : "audio too short (<500ms)",
+        rawMetrics: {
+          pitchHz: acousticFeatures.pitchHz,
+          rmsEnergy: acousticFeatures.rmsEnergy,
+          zeroCrossingRate: acousticFeatures.zeroCrossingRate,
+          speakingRateWPM: acousticFeatures.speakingRateWPM,
+          decibels: acousticFeatures.decibels,
+        },
       }
     : null;
 
