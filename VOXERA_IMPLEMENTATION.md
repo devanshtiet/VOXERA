@@ -1032,3 +1032,50 @@ rendering the form.
   200, form renders); `/admin` still redirects unauthenticated visitors to `/login`. Could not verify
   the authenticated-redirect path itself live — no reachable Supabase connection to log in from this
   sandbox — left for the user to confirm.
+
+### 2026-08-17 — Agent Builder Redesign: Vapi-Style Create Flow + Tabbed Editor
+
+**Objective**: Requested directly, referencing Vapi and similar platforms: the original Agent Builder
+(one long flat form, manual-only creation) needed a real AI-assisted creation flow, a nicer multi-agent
+list, and a more organized editor — "make this the best voice agent builder."
+
+**Changes Implemented**:
+1. **`CreateAgentDialog.tsx`** — clicking "New Agent" now opens a choice: "Describe it — I'll build it"
+   (AI) or "Start from scratch" (manual), matching Vapi's create-assistant flow. The AI path asks for
+   one free-text description and returns a full draft (name, description, system prompt, greeting) for
+   review before saving — nothing is auto-saved sight-unseen.
+2. **`/api/admin/agents/generate`** — new route generating a *complete* agent profile as strict JSON in
+   one call, distinct from the existing `/api/onboarding/generate-prompt` (which only drafts the prompt
+   text given a name+description already known). Instructs the model to output ONLY a JSON object (no
+   prose/fences), defensively strips a ```json fence if the model adds one anyway, and validates the
+   required fields before returning — surfaces a friendly error and falls back to manual entry if
+   generation or parsing fails.
+3. **Tabbed editor** — replaced the single long scrolling form with "Persona" (description, greeting,
+   voice) and "Prompt" tabs, plus a sticky header with an inline-editable agent name, a prominent "Talk
+   to Agent" deep link, and an always-visible Save button — mirrors how Vapi separates an assistant's
+   identity from its model/prompt configuration instead of one flat form.
+4. **Regenerate prompt in place** — the Prompt tab's manual/AI toggle reuses the existing
+   `/api/onboarding/generate-prompt` route (not duplicated) so an *existing* agent's prompt can be
+   regenerated from its current name/description at any time, not just at creation.
+5. **Nicer agent list** — colored initial avatars (hashed per agent id), "updated Xh ago" timestamps,
+   a search box once there are more than a few agents, and hover-to-delete directly from the list
+   instead of requiring selection first.
+6. **`app/admin/agents/types.ts`** — shared `Agent`/`Draft`/`GeneratedAgentDraft`/`VOICE_PERSONAS`
+   types extracted so the new dialog and page components don't duplicate them.
+
+**Files Created**: `app/api/admin/agents/generate/route.ts`, `app/admin/agents/CreateAgentDialog.tsx`,
+`app/admin/agents/types.ts`
+
+**Files Modified**: `app/admin/agents/page.tsx` (full rewrite)
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (305 passing), `npm run build` — all clean;
+  `/admin/agents`, `/api/admin/agents/generate` present in the route manifest
+- Live-verified: `/api/admin/agents/generate` correctly rejects unauthenticated requests;
+  `/admin/agents` redirects unauthenticated visitors to `/login`
+- **Live-verified the actual JSON generation against the real LLM** (bypassing auth via a standalone
+  script, `--env-file=.env.local`): produced a complete, valid, correctly-fenced JSON object with all
+  four required fields for a real "dental clinic" description, parsed cleanly through the exact
+  fence-stripping logic the route uses
+- Could not click through the dialog/tabbed editor itself in-browser — no reachable Supabase
+  connection to log in from this sandbox — left for the user to verify the UI interactions
