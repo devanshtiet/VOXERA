@@ -36,40 +36,42 @@ export default async function AdminTenantsPage() {
   });
 
   return (
-    <div className="p-8 max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
+    <div className="p-6 md:p-10 font-body min-h-screen max-w-6xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold tracking-tight mb-2 flex items-center gap-3">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-[var(--color-text-primary)] flex items-center gap-3">
             <Users className="w-8 h-8 text-[var(--color-accent-cyan)]" />
             Tenants
           </h1>
-          <p className="text-[var(--color-text-secondary)]">Manage platform organizations and subscriptions.</p>
+          <p className="text-[15px] text-[var(--color-text-secondary)] mt-2 max-w-xl">
+            Manage platform organizations and subscriptions.
+          </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <StatCard title="Total Tenants" value={tenantStats.length.toString()} icon={Building} />
-        <StatCard 
-          title="Active Paid Subscriptions" 
-          value={tenantStats.filter(t => t.sub.status === "active" && t.sub.tier !== "free").length.toString()} 
-          icon={CheckCircle2} 
+        <StatCard
+          title="Active Paid Subscriptions"
+          value={tenantStats.filter(t => t.sub.status === "active" && t.sub.tier !== "free").length.toString()}
+          icon={CheckCircle2}
         />
-        <StatCard 
-          title="Total API Calls" 
-          value={(callLogs?.length || 0).toString()} 
-          icon={Clock} 
+        <StatCard
+          title="Total API Calls"
+          value={(callLogs?.length || 0).toString()}
+          icon={Clock}
         />
       </div>
 
-      <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+      <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl overflow-hidden shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
         <table className="w-full text-left text-[14px]">
-          <thead className="bg-[var(--color-bg-base)] border-b border-[var(--color-border-subtle)] text-[12px] font-mono uppercase tracking-widest text-[var(--color-text-secondary)]">
+          <thead className="bg-[var(--color-bg-surface)] border-b border-[var(--color-border-subtle)] text-[10.5px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
             <tr>
-              <th className="px-6 py-4 font-semibold">Tenant Name</th>
-              <th className="px-6 py-4 font-semibold">Industry</th>
-              <th className="px-6 py-4 font-semibold">Plan</th>
-              <th className="px-6 py-4 font-semibold">Usage (Calls/Docs)</th>
-              <th className="px-6 py-4 font-semibold">Created</th>
+              <th className="px-6 py-4">Tenant Name</th>
+              <th className="px-6 py-4">Industry</th>
+              <th className="px-6 py-4">Plan</th>
+              <th className="px-6 py-4">Usage (Calls/Docs)</th>
+              <th className="px-6 py-4">Created</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -121,12 +123,12 @@ export default async function AdminTenantsPage() {
 
 function StatCard({ title, value, icon: Icon }: { title: string; value: string; icon: any }) {
   return (
-    <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex items-start gap-4">
-      <div className="p-3 rounded-xl bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)]">
+    <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex items-start gap-4">
+      <div className="p-3 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)]">
         <Icon className="w-6 h-6 text-[var(--color-accent-cyan)]" />
       </div>
       <div>
-        <h3 className="text-[13px] font-mono uppercase tracking-widest font-semibold text-[var(--color-text-secondary)] mb-1">{title}</h3>
+        <h3 className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-text-secondary)] mb-1.5">{title}</h3>
         <p className="text-3xl font-display font-bold text-[var(--color-text-primary)]">{value}</p>
       </div>
     </div>

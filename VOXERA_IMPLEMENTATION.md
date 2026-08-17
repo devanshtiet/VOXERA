@@ -1348,3 +1348,45 @@ documented Next.js mechanism for excluding a package from server-side bundling, 
   server — before this fix this reproduces the exact reported "fake worker" error; after the fix it
   returned `{"ok":true,"text":"Hello PDF worker test..."}`. Diagnostic route deleted after verification,
   not part of the shipped change.
+
+### 2026-08-17 — Admin Dashboard UI Consistency Pass
+
+**Objective**: User asked to make "all the dashboard pages" look classy/modern/professional, off a
+screenshot of `/admin/knowledge` that looked visibly plainer than the recently-redesigned Agent
+Builder page.
+
+**Root cause, not a redesign-from-scratch situation**: the app already has one deliberate, polished
+design system — `app/globals.css`'s `--color-*` tokens (Bricolage Grotesque display font, DM Sans
+body font, violet→cyan gradient accents), already used correctly by Agent Builder, the landing page,
+and `/demo`. The other admin pages (`/admin`, `/admin/knowledge`, `/admin/sessions`, `/admin/tenants`,
+`/admin/rag`) mostly *did* reference the same `--color-*` tokens, but were written before (or without
+noticing) that `globals.css` had settled on light-only theming — every one of them still had scattered
+hardcoded dark-theme assumptions left over: raw `text-white` on headings/values/hover states (invisible
+or near-invisible against the light `--color-bg-elevated: #FFFFFF` background), `bg-gray-800`/
+`bg-zinc-800` as "subtle" borders or empty-state fills (renders as a heavy dark line/blob on a light
+page, not subtle), and one page using a lighter drop-shadow opacity than Agent Builder's established
+`rgba(0,0,0,0.5)`. `/admin/settings` and `/admin/try-call` had already been written correctly and
+needed no fixes beyond a header icon for visual consistency.
+
+**Fix**: went through each of `/admin`, `/admin/knowledge`, `/admin/sessions`, `/admin/tenants`,
+`/admin/rag`, `/admin/try-call` and: replaced every hardcoded `text-white`/`hover:text-white` that
+wasn't on a genuinely dark surface (gradient buttons and tooltip popovers with an explicit `bg-black`
+correctly kept `text-white`) with the semantic `--color-text-primary` token; replaced `bg-gray-800`/
+`bg-zinc-800`/`text-zinc-500`/`text-zinc-300` neutral-gray fallbacks with the equivalent `--color-*`
+tokens; standardized card shadows to Agent Builder's `shadow-[0_4px_30px_rgba(0,0,0,0.5)]`; aligned
+error/success banner styling to the low-opacity-tint-plus-solid-text pattern already proven in Agent
+Builder (`bg-red-950/[0.04] border-red-500/25 text-red-600`, and the emerald equivalent) instead of
+the darker `bg-red-950/30 border-red-900/50 text-red-400` combo that reads as muddy on a light
+background; added the icon + `font-display text-3xl` header pattern consistently across all pages
+(Knowledge Base, Sessions, Tenants, Try a Call); rebuilt the Knowledge Base page's upload panel with a
+proper drag-and-drop zone (previously click-only) and updated its accepted-formats copy to match the
+now-expanded TXT/PDF/Markdown/CSV/JSON/DOCX support from the earlier entry in this file.
+
+**Files Modified**: `app/admin/page.tsx`, `app/admin/knowledge/page.tsx`, `app/admin/sessions/page.tsx`,
+`app/admin/tenants/page.tsx`, `app/admin/rag/page.tsx`, `app/admin/try-call/page.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (308 passing), `npm run build` — all clean
+- Could not visually click through the authenticated `/admin/*` pages in this pass — same limitation
+  noted in earlier entries, this sandbox has no login credentials for the admin dashboard. Recommend a
+  manual pass in a running dev server across all six pages before considering this fully verified.

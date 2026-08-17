@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MessageSquare } from "lucide-react";
 
 interface SessionSummary {
   sessionId: string;
@@ -92,9 +93,12 @@ export default function SessionsPage() {
 
   return (
     <div className="p-6 md:p-10 font-body min-h-screen">
-      <header className="mb-10">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-[var(--color-text-primary)]">Session History</h1>
-        <p className="text-[15px] text-[var(--color-text-secondary)] mt-2">
+      <header className="mb-8">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-[var(--color-text-primary)] flex items-center gap-3">
+          <MessageSquare className="w-8 h-8 text-[var(--color-accent-cyan)]" />
+          Session History
+        </h1>
+        <p className="text-[15px] text-[var(--color-text-secondary)] mt-2 max-w-xl">
           Browse past conversations and inspect emotion timelines.
         </p>
       </header>
@@ -249,7 +253,7 @@ export default function SessionsPage() {
                                 <div className="space-y-2">
                                   {(ev.payload.timeline as any[]).map((evt, idx) => (
                                     <div key={idx} className="border-l border-[var(--color-accent-cyan)] pl-2">
-                                      <span className="font-bold text-white text-[11px] uppercase tracking-wider">{evt.topic}</span>
+                                      <span className="font-bold text-[var(--color-text-primary)] text-[11px] uppercase tracking-wider">{evt.topic}</span>
                                       <p className="text-[11px] text-[var(--color-text-secondary)] italic">"{evt.summary}"</p>
                                     </div>
                                   ))}

@@ -76,10 +76,10 @@ export default function AnalyticsDashboard() {
 
   if (error) return (
     <div className="p-8 md:p-10 font-body">
-      <div className="bg-red-950/30 border border-red-900/50 text-red-400 p-6 rounded-2xl">
+      <div className="bg-red-950/[0.04] border border-red-500/25 text-red-600 p-6 rounded-2xl">
         <h2 className="font-bold mb-2">Failed to load analytics</h2>
-        <p className="text-[14px]">{error}</p>
-        <p className="mt-4 text-[13px] text-red-500/70">Tip: Make sure the SQL migration has been run in your Supabase SQL Editor.</p>
+        <p className="text-[14px] opacity-90">{error}</p>
+        <p className="mt-4 text-[13px] opacity-70">Tip: Make sure the SQL migration has been run in your Supabase SQL Editor.</p>
       </div>
     </div>
   );
@@ -172,7 +172,7 @@ export default function AnalyticsDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
         
         {/* Sprint 1: Live Telephony Cards */}
-        <div className="lg:col-span-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-lg">
+        <div className="lg:col-span-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
           <div className="flex items-center gap-3 mb-6">
             <PhoneCall className="w-4 h-4 text-[var(--color-accent-cyan)]" />
             <h2 className="text-[11px] font-mono font-bold text-[var(--color-text-secondary)] uppercase tracking-widest">Live Telephony</h2>
@@ -191,7 +191,7 @@ export default function AnalyticsDashboard() {
         </div>
 
         {/* Sprint 5: Call Duration, Missed Bookings */}
-        <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-lg flex flex-col justify-between">
+        <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-[var(--color-accent-violet)]" />
@@ -202,7 +202,7 @@ export default function AnalyticsDashboard() {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl p-4">
               <span className="text-[10px] font-mono font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">Avg Session</span>
-              <span className="text-[15px] font-extrabold text-white">{formatDuration(m.avgSessionDurationMs)}</span>
+              <span className="text-[15px] font-extrabold text-[var(--color-text-primary)]">{formatDuration(m.avgSessionDurationMs)}</span>
             </div>
             <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl p-4 relative overflow-hidden">
               <span className="text-[10px] font-mono font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">Missed Bookings</span>
@@ -223,10 +223,10 @@ export default function AnalyticsDashboard() {
         <div className="xl:col-span-2 space-y-6">
           
           {/* Heatmap Hour tracker */}
-          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-md">
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
             <div className="flex items-center gap-2 mb-4">
               <Flame className="w-4 h-4 text-amber-500" />
-              <h3 className="text-[14px] font-bold text-white">Peak Hours Heatmap</h3>
+              <h3 className="text-[14px] font-bold text-[var(--color-text-primary)]">Peak Hours Heatmap</h3>
             </div>
             <p className="text-xs text-[var(--color-text-secondary)] mb-6">Visual representation of call session arrivals across 24 hours of the day.</p>
             <div className="flex items-end gap-1 sm:gap-2 h-24 pt-4 border-b border-[var(--color-border-subtle)]">
@@ -234,7 +234,7 @@ export default function AnalyticsDashboard() {
                 const heightPct = Math.max(Math.round((count / maxHourVal) * 100), 4);
                 // Heatmap color shade based on volume
                 const bgClass = count === 0 
-                  ? "bg-gray-800/40" 
+                  ? "bg-[var(--color-border-subtle)]" 
                   : count / maxHourVal > 0.6 
                     ? "bg-gradient-to-t from-[var(--color-accent-cyan)] to-emerald-400"
                     : "bg-[var(--color-accent-cyan)]/60";
@@ -260,10 +260,10 @@ export default function AnalyticsDashboard() {
           </div>
 
           {/* Daily Trend line */}
-          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-md">
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
             <div className="flex items-center gap-2 mb-4">
               <TrendingUp className="w-4 h-4 text-[var(--color-accent-cyan)]" />
-              <h3 className="text-[14px] font-bold text-white">Daily Call Trends</h3>
+              <h3 className="text-[14px] font-bold text-[var(--color-text-primary)]">Daily Call Trends</h3>
             </div>
             {dailyTrend.length === 0 ? (
               <p className="text-[var(--color-text-muted)] text-[13px] italic h-36 flex items-center justify-center">No trend data available.</p>
@@ -291,9 +291,9 @@ export default function AnalyticsDashboard() {
         <div className="space-y-6">
           
           {/* Conversion rate card */}
-          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-md flex items-center justify-between">
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex items-center justify-between">
             <div className="max-w-[60%]">
-              <h3 className="text-[14px] font-bold text-white mb-2">Booking Conversion</h3>
+              <h3 className="text-[14px] font-bold text-[var(--color-text-primary)] mb-2">Booking Conversion</h3>
               <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">Percentage of customer calls successfully resulting in reservations.</p>
             </div>
             
@@ -317,17 +317,17 @@ export default function AnalyticsDashboard() {
           </div>
 
           {/* Confidence distribution card */}
-          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-md">
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] rounded-2xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Award className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-[14px] font-bold text-white">SER Confidence Breakdown</h3>
+                <h3 className="text-[14px] font-bold text-[var(--color-text-primary)]">SER Confidence Breakdown</h3>
               </div>
             </div>
             <p className="text-xs text-[var(--color-text-secondary)] mb-6">Accuracy categories for Speech Emotion Recognition classifications.</p>
             
             {/* Segmented bar */}
-            <div className="w-full bg-gray-800 rounded-full h-3 flex overflow-hidden mb-6">
+            <div className="w-full bg-[var(--color-border-subtle)] rounded-full h-3 flex overflow-hidden mb-6">
               <div className="bg-emerald-500 transition-all duration-500" style={{ width: `${confDist.high}%` }} title={`High Confidence: ${confDist.high}%`} />
               <div className="bg-amber-500 transition-all duration-500" style={{ width: `${confDist.medium}%` }} title={`Medium Confidence: ${confDist.medium}%`} />
               <div className="bg-red-500 transition-all duration-500" style={{ width: `${confDist.low}%` }} title={`Low Confidence: ${confDist.low}%`} />
@@ -481,7 +481,7 @@ function ChecklistItem({ title, desc, done, href }: { title: string, desc: strin
           <h4 className={`text-[14px] font-semibold ${done ? "text-[var(--color-text-secondary)]" : "text-[var(--color-text-primary)]"}`}>{title}</h4>
           <p className="text-[12px] text-[var(--color-text-muted)] mt-1">{desc}</p>
           {!done && href && (
-            <Link href={href} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--color-accent-cyan)] mt-3 hover:text-white transition-colors">
+            <Link href={href} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--color-accent-cyan)] mt-3 hover:text-[var(--color-accent-violet)] transition-colors">
               Start <ArrowRight className="w-3 h-3" />
             </Link>
           )}

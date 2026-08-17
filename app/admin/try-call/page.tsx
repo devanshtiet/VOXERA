@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PhoneCall } from "lucide-react";
 import { createClient } from "../../../lib/db/server";
 import { VoiceAgent } from "../../_components/VoiceAgent";
 
@@ -39,10 +39,11 @@ export default async function TryCallPage() {
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
           </Link>
-          <h1 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tighter text-gradient">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-[var(--color-text-primary)] flex items-center gap-3">
+            <PhoneCall className="w-8 h-8 text-[var(--color-accent-cyan)]" />
             Try a Call
           </h1>
-          <p className="mt-2 text-[14px] text-[var(--color-text-secondary)]">
+          <p className="mt-2 text-[15px] text-[var(--color-text-secondary)] max-w-xl">
             Speak or type as a caller. This session is live — open{" "}
             <Link href="/admin" className="text-[var(--color-accent-cyan)] hover:underline">
               the dashboard
