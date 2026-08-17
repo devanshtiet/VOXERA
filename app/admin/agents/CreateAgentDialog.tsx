@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Wand2, PenLine, Sparkles, Loader2, ArrowLeft, X, AlertCircle } from "lucide-react";
+import { useRef, useState } from "react";
+import { Wand2, PenLine, Sparkles, Loader2, ArrowLeft, X, AlertCircle, Upload, FileText, Check } from "lucide-react";
 import type { GeneratedAgentDraft } from "./types";
 
 interface CreateAgentDialogProps {
@@ -12,21 +12,72 @@ interface CreateAgentDialogProps {
 
 type Mode = "choose" | "ai";
 
+interface AttachedFile {
+  file: File;
+  status: "pending" | "uploading" | "done" | "error";
+  extractedTextPreview?: string;
+  error?: string;
+}
+
+const ACCEPTED_EXTENSIONS = ".txt,.pdf,.md,.markdown,.csv,.json,.docx";
+const MAX_FILE_CONTEXT_CHARS = 8000;
+
 export function CreateAgentDialog({ onClose, onManual, onGenerated }: CreateAgentDialogProps) {
   const [mode, setMode] = useState<Mode>("choose");
   const [description, setDescription] = useState("");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [files, setFiles] = useState<AttachedFile[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const addFiles = (fileList: FileList) => {
+    const newFiles: AttachedFile[] = Array.from(fileList).map((file) => ({ file, status: "pending" }));
+    setFiles((prev) => [...prev, ...newFiles]);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadFile = async (attached: AttachedFile, index: number) => {
+    setFiles((prev) => prev.map((f, i) => (i === index ? { ...f, status: "uploading" } : f)));
+    try {
+      const formData = new FormData();
+      formData.append("file", attached.file);
+      const res = await fetch("/api/knowledge/upload", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Upload failed");
+      setFiles((prev) =>
+        prev.map((f, i) => (i === index ? { ...f, status: "done", extractedTextPreview: data.extractedTextPreview } : f))
+      );
+    } catch (e) {
+      setFiles((prev) =>
+        prev.map((f, i) => (i === index ? { ...f, status: "error", error: e instanceof Error ? e.message : String(e) } : f))
+      );
+    }
+  };
 
   const generate = async () => {
     if (!description.trim()) return;
     setGenerating(true);
     setError(null);
     try {
+      // Upload any files that haven't been uploaded yet (also seeds the
+      // knowledge base for this account — not just prompt context).
+      const pending = files.map((f, i) => ({ f, i })).filter(({ f }) => f.status === "pending" || f.status === "error");
+      await Promise.all(pending.map(({ f, i }) => uploadFile(f, i)));
+
+      const fileContext = files
+        .filter((f) => f.extractedTextPreview)
+        .map((f) => `--- ${f.file.name} ---\n${f.extractedTextPreview}`)
+        .join("\n\n")
+        .slice(0, MAX_FILE_CONTEXT_CHARS);
+
       const res = await fetch("/api/admin/agents/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description }),
+        body: JSON.stringify({ description, fileContext: fileContext || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate an agent.");
@@ -78,8 +129,9 @@ export function CreateAgentDialog({ onClose, onManual, onGenerated }: CreateAgen
               <span>
                 <div className="text-[14.5px] font-semibold text-[var(--color-text-primary)]">Describe it — I'll build it</div>
                 <div className="text-[12.5px] text-[var(--color-text-secondary)] mt-0.5">
-                  Tell me about your business and what the agent should handle. I'll draft the name,
-                  personality, prompt, and greeting for you to review.
+                  Tell me about your business and what the agent should handle — optionally attach a
+                  pricing sheet, FAQ, or policy doc. I'll draft the name, personality, prompt, and
+                  greeting for you to review.
                 </div>
               </span>
             </button>
@@ -115,6 +167,78 @@ export function CreateAgentDialog({ onClose, onManual, onGenerated }: CreateAgen
                 placeholder="e.g. We're a dental clinic called Acme Dental. This agent should answer calls, help patients book or reschedule appointments, answer basic questions about our services and hours, and offer to connect a caller to the front desk for anything urgent."
                 className="w-full px-4 py-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-violet)] focus:border-[var(--color-accent-violet)] text-[13.5px] text-[var(--color-text-primary)] transition-colors placeholder:text-[var(--color-text-muted)] resize-none"
               />
+            </div>
+
+            <div>
+              <label className="block text-[12px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">
+                Attach reference material <span className="font-normal normal-case text-[var(--color-text-muted)]">(optional)</span>
+              </label>
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed py-4 px-4 cursor-pointer transition-colors text-center ${
+                  dragOver
+                    ? "border-[var(--color-accent-cyan)] bg-[var(--color-bg-base)]"
+                    : "border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] hover:border-[var(--color-border-active)]"
+                }`}
+              >
+                <Upload className="w-5 h-5 text-[var(--color-text-muted)]" />
+                <p className="text-[12.5px] text-[var(--color-text-secondary)]">
+                  <span className="font-semibold text-[var(--color-accent-violet)]">Upload files</span> or drag and drop
+                </p>
+                <p className="text-[10.5px] text-[var(--color-text-muted)] font-mono">
+                  TXT · PDF · MD · CSV · JSON · DOCX
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={ACCEPTED_EXTENSIONS}
+                  className="hidden"
+                  onChange={(e) => e.target.files?.length && addFiles(e.target.files)}
+                />
+              </div>
+
+              {files.length > 0 && (
+                <div className="flex flex-col gap-1.5 mt-2.5">
+                  {files.map((f, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[12px]"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-[var(--color-accent-violet)] flex-none" />
+                      <span className="truncate flex-1 text-[var(--color-text-primary)]">{f.file.name}</span>
+                      {f.status === "uploading" && <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-text-muted)] flex-none" />}
+                      {f.status === "done" && <Check className="w-3.5 h-3.5 text-emerald-500 flex-none" />}
+                      {f.status === "error" && (
+                        <span className="text-red-500 text-[10.5px] flex-none" title={f.error}>
+                          failed
+                        </span>
+                      )}
+                      <button
+                        onClick={() => removeFile(i)}
+                        disabled={f.status === "uploading"}
+                        className="text-[var(--color-text-muted)] hover:text-red-500 transition-colors flex-none disabled:opacity-40"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[10.5px] text-[var(--color-text-muted)] mt-1.5">
+                Files are added to your knowledge base (shared across agents on your account) and used
+                to ground this agent's drafted prompt in real specifics.
+              </p>
             </div>
 
             {error && (

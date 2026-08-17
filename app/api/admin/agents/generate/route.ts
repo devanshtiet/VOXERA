@@ -9,6 +9,11 @@ export const dynamic = "force-dynamic";
 
 const RequestSchema = z.object({
   description: z.string().min(1).max(2000),
+  /** Extracted text from files attached in the create-agent dialog (pricing
+   * sheets, FAQs, policy docs) — lets the drafted prompt reference real
+   * specifics instead of only what fit in the short description field.
+   * Capped well under the LLM's input budget (CONFIG.llm.maxInputTokens). */
+  fileContext: z.string().max(8000).optional(),
 });
 
 const GENERATOR_SYSTEM_PROMPT = [
@@ -24,11 +29,18 @@ const GENERATOR_SYSTEM_PROMPT = [
   "- description: one sentence summarizing what this agent does, shown in a list of agents.",
   "- system_prompt: written in second person (\"You are...\"), covering who the agent is, its " +
     "personality/tone, and what it should help callers with. Grounded ONLY in what the description " +
-    "actually says — never invent specific prices, hours, or policies that weren't mentioned. This " +
-    "prompt is layered on top of the platform's own core safety/escalation rules, which already " +
-    "handle those — focus on what makes this agent distinct. 3-6 sentences.",
+    "(and attached reference material, if any) actually says — never invent specific prices, hours, " +
+    "or policies that weren't mentioned anywhere. If reference material is attached, prefer citing " +
+    "its concrete specifics (actual prices, hours, service names) over generic language — that's the " +
+    "whole point of attaching it. This prompt is layered on top of the platform's own core safety/" +
+    "escalation rules, which already handle those — focus on what makes this agent distinct. " +
+    "3-6 sentences.",
   "- greeting: a short, natural first line the agent would say when answering a call — one sentence, " +
     "no more than ~15 words, matching the personality of the system_prompt.",
+  "",
+  "If a REFERENCE MATERIAL block is provided below the business description, it's real content from " +
+    "a document the business uploaded (pricing sheet, FAQ, policy doc, etc.) — treat it as ground " +
+    "truth, not a suggestion. Only use what it actually says; don't extrapolate beyond it.",
 ].join("\n");
 
 function extractJson(raw: string): string {
@@ -53,9 +65,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const userMessage = parsed.data.fileContext
+      ? `${parsed.data.description}\n\n=== REFERENCE MATERIAL (from attached file(s)) ===\n${parsed.data.fileContext}`
+      : parsed.data.description;
+
     const reply = await generateReply({
       system: GENERATOR_SYSTEM_PROMPT,
-      user: parsed.data.description,
+      user: userMessage,
       clientId: user.id,
       maxOutputTokens: 500,
       useTools: false,
