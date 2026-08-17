@@ -1,6 +1,6 @@
 import type { AcousticFeatures, EmotionLabel, EmotionSignal, MemoryTier, MemoryRecord, Utterance, VAD } from "../types";
 import { CONFIG } from "../config";
-import { detectTextEmotionHF, type HFDetectResult } from "./ml-detect";
+import type { HFDetectResult } from "./ml-detect";
 import { detectTextEmotionLexicon, fuseEmotion, type TextEmotionResult } from "./detect";
 import { detectTextEmotionLocalONNX, type LocalOnnxDetectResult } from "./local-onnx-detect";
 import { detectAudioEmotion } from "./audio-emotion";
@@ -8,11 +8,18 @@ import { detectAudioEmotionWav2Vec2, type LocalAudioDetectResult } from "./local
 import { buildEmotionContext } from "./context";
 import { importanceScore, taskCriticality, policyFlag } from "./importance";
 
+/** Always-empty HF result — HF was removed from the pipeline (see detect.ts);
+ * `hf`/`EngineDiagnostic["engine"] === "hf"` stay in these shapes only so
+ * existing diagnostics consumers don't need type changes for a field that's
+ * now permanently unavailable. */
+const HF_DISABLED_RESULT: HFDetectResult = { signal: null, latencyMs: 0, timedOut: false };
+
 /**
  * Per-engine diagnostic breakdown — Phase 1 instrumentation (see the
- * "Emotion Engine Overhaul" issue). Lets HF, Lexicon, Local ONNX, Acoustic
+ * "Emotion Engine Overhaul" issue). Lets Lexicon, Local ONNX, Acoustic
  * (DSP heuristic), and Acoustic ML (wav2vec2) be compared side-by-side for
  * the same input, independent of which one production selects as primary.
+ * HF is no longer run (see detect.ts) and always reports unavailable.
  */
 export interface EngineDiagnostic {
   engine: "hf" | "lexicon" | "local_onnx" | "acoustic" | "acoustic_ml";
@@ -117,31 +124,36 @@ export async function runDiagnosticEmotion(
 ): Promise<DiagnosticEmotionResult> {
   const start = performance.now();
 
-  let hfResult: HFDetectResult;
+  const hfResult: HFDetectResult = HF_DISABLED_RESULT;
   let lexiconResult: ReturnType<typeof detectTextEmotionLexicon>;
   let localOnnxResult: LocalOnnxDetectResult;
 
-  // Kick off the (potentially slow, cold-start-loaded) wav2vec2 classifier
-  // concurrently with everything else rather than after it, so its latency
-  // overlaps instead of stacking on top.
+  // Kick off the (potentially slow, cold-start-loaded — verified live: ~56s
+  // cold, ~330ms warm) wav2vec2 classifier concurrently with everything else
+  // rather than after it, so its latency overlaps instead of stacking on
+  // top. Unlike the text ONNX engine, this call previously had no timeout at
+  // all, so a cold load could single-handedly stall an entire live turn —
+  // raced against a budget the same way localOnnxLatencyBudgetMs already
+  // bounds the text engine.
+  const audioMlBudgetMs = CONFIG.emotion.localAudioMlLatencyBudgetMs;
   const acousticMlPromise: Promise<LocalAudioDetectResult | null> = rawAudio16kHz
-    ? detectAudioEmotionWav2Vec2(rawAudio16kHz).catch((err): LocalAudioDetectResult => {
-        console.warn("[EmotionDiagnostic] wav2vec2 threw:", err);
-        return { signal: null, latencyMs: 0, errored: true };
-      })
+    ? Promise.race([
+        detectAudioEmotionWav2Vec2(rawAudio16kHz).catch((err): LocalAudioDetectResult => {
+          console.warn("[EmotionDiagnostic] wav2vec2 threw:", err);
+          return { signal: null, latencyMs: 0, errored: true };
+        }),
+        new Promise<LocalAudioDetectResult>((resolve) =>
+          setTimeout(() => resolve({ signal: null, latencyMs: audioMlBudgetMs, errored: false }), audioMlBudgetMs)
+        ),
+      ])
     : Promise.resolve(null);
 
   if (precomputed) {
-    hfResult = precomputed.textEmoResult.hf;
     lexiconResult = precomputed.textEmoResult.lexicon;
     localOnnxResult = precomputed.localOnnxResult;
   } else {
-    // No precomputed results — run all three concurrently, same as before.
-    [hfResult, lexiconResult, localOnnxResult] = await Promise.all([
-      detectTextEmotionHF(text).catch((err): HFDetectResult => {
-        console.warn("[EmotionDiagnostic] HF threw:", err);
-        return { signal: null, latencyMs: 0, timedOut: false };
-      }),
+    // No precomputed results — run Lexicon + Local ONNX concurrently.
+    [lexiconResult, localOnnxResult] = await Promise.all([
       Promise.resolve(detectTextEmotionLexicon(text)),
       detectTextEmotionLocalONNX(text),
     ]);
@@ -170,11 +182,7 @@ export async function runDiagnosticEmotion(
     timedOut: hfResult.timedOut,
     importance: hfScore.importance,
     memoryClassification: hfScore.memoryClassification,
-    unavailableReason: hfResult.signal
-      ? undefined
-      : hfResult.timedOut
-        ? "timed out"
-        : "unavailable (no token or error)",
+    unavailableReason: "removed — same model as Local ONNX, scrapped after eval showed zero accuracy benefit",
   };
 
   const lexicon: EngineDiagnostic = {
@@ -261,25 +269,14 @@ export async function runDiagnosticEmotion(
             engine: "local_onnx",
             reason: `Lexicon found no keyword match; Local ONNX returned in ${localOnnxResult.latencyMs.toFixed(1)}ms with label=${localOnnxResult.signal.label} conf=${localOnnxResult.signal.confidence.toFixed(3)}`,
           }
-        : hfResult.signal && !hfResult.timedOut
-          ? {
-              engine: "hf",
-              reason: `Lexicon found no keyword match; Local ONNX unavailable, HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
-            }
-          : {
-              engine: "lexicon",
-              reason: localOnnxResult.errored
-                ? "Lexicon found no keyword match; Local ONNX errored and HF unavailable (no token or error), using lexicon default"
-                : hfResult.timedOut
-                  ? "Lexicon found no keyword match; Local ONNX and HF both unavailable/timed out, using lexicon default"
-                  : "Lexicon found no keyword match; Local ONNX and HF both unavailable (no token or error), using lexicon default",
-            };
+        : {
+            engine: "lexicon",
+            reason: localOnnxResult.errored
+              ? "Lexicon found no keyword match; Local ONNX errored, using lexicon default"
+              : "Lexicon found no keyword match; Local ONNX unavailable/timed out, using lexicon default",
+          };
   const textPrimary =
-    textSelection.engine === "local_onnx" && localOnnxResult.signal
-      ? localOnnxResult.signal
-      : textSelection.engine === "hf" && hfResult.signal
-        ? hfResult.signal
-        : lexiconResult;
+    textSelection.engine === "local_onnx" && localOnnxResult.signal ? localOnnxResult.signal : lexiconResult;
   const final = fuseEmotion(textPrimary, audioSignal);
 
   return {

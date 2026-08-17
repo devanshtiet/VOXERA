@@ -2106,3 +2106,260 @@ run` (316 passing), `npm run build` all clean. Cleaned up all synthetic `session
 created during this investigation.
 
 **Files Modified**: `lib/agent/llm.ts`
+
+### 2026-08-18, later still — Two More Real Bugs Found From an Actual Call Transcript
+
+**Objective**: With the silent-LLM-reply fix live, the user placed a real call and shared the full
+server log: STT genuinely transcribed "Hello?" three times, the LLM genuinely replied each time
+("Hey there — hi! How's it going?", etc.), and the call ended cleanly after 28s — but the caller heard
+no audio at all. The same log also showed `callSid=unknown` on every line for this call, despite the
+TwiML's `<Stream>` URL clearly containing the real callSid as a query parameter.
+
+**Root cause #1 (the actual silence)**: `TelephonyStreamHandler`'s constructor called `this.init()`,
+an async function that `await`s `callQueue.markCallStarted()` then `this.deepgram.connect()` (a real
+network round-trip) *before* ever calling `this.ws.on("message", ...)`. Twilio sends `"connected"` and
+`"start"` within milliseconds of the WebSocket opening — Node's `EventEmitter` drops events fired
+before a listener exists, so on a real call those two events were silently lost while `init()` was
+still awaiting Deepgram. `"start"` is the only place `this.streamSid` ever gets set, and
+`speakToTwilio()` silently returns (`if (!this.streamSid || ...) return;`, no log) whenever it's unset
+— so the agent's replies were being generated and logged correctly, then silently discarded every
+single time. STT still worked because later `"media"` frames arrived *after* the listener finally
+attached. This is the exact bug class `server.ts`'s browser-demo path already documents fixing with the
+same "register every ws handler before awaiting anything" pattern — telephony's handler never got that
+fix. Moved `ws.on("message"/"close"/"error")` into the constructor synchronously, before `this.init()`
+is even called.
+
+**Root cause #2 (`callSid=unknown`)**: Twilio does not reliably forward arbitrary query-string
+parameters on the Media Stream WebSocket connection URL — confirmed directly: the TwiML's
+`<Stream url="...&callSid=...&clientId=...">` clearly had them, yet the handler read `"unknown"` for
+`callSid` at WS-upgrade time on a real call. This meant `clientId` was almost certainly also silently
+falling back to `"demo"` on every real call — the wrong tenant's prompt/knowledge base — and
+`updateCallLog` was targeting a `call_logs` row keyed `"unknown"` that never existed, silently updating
+zero rows (this is *also* why `sessionId` stayed `null` on real calls even when nothing else was
+broken). Twilio's actual documented mechanism for custom data on a Media Stream is `<Parameter>`
+elements, delivered in the `"start"` event's `start.customParameters` — not the connection URL.
+`buildConnectTwiml` (`lib/telephony/twilio.ts`) now takes a `customParams` record and emits one
+`<Parameter>` per entry instead of just `callSid`; both call sites
+(`app/api/telephony/incoming/route.ts`, `app/api/telephony/dequeue/route.ts`) now pass
+`callSid`/`clientId`/`caller`/`agentId`. The stream handler's `"start"` case now corrects
+`this.callSid` from Twilio's own authoritative `start.callSid` and `this.clientId`/`this.agentId`/
+`this.callerNumber` from `start.customParameters`, and the `updateCallLog` call moved from `init()`
+into the `"start"` case — it needs the corrected callSid to ever match a real row, so calling it before
+`"start"` arrives was pointless even before bug #1 masked the issue entirely. The query-string params
+are kept as a harmless best-effort fallback (useful for direct non-Twilio WS testing) but are no longer
+the source of truth.
+
+**Verified live, not just by reasoning about it**: restarted the dev server under this session's own
+tracking (again — it kept drifting to processes outside my visibility across this whole investigation)
+and sent a synthetic WebSocket connection with **zero query-string parameters at all** (matching
+Twilio's real behavior) and a `"start"` event carrying `customParameters`. Server log:
+`[TelephonyStream] Stream started: callSid=CArealtest1 clientId=176d6905-...-8d02d7836cb95b
+streamSid=MZrealtest1` — appearing *before* `"[Deepgram Live] Connected"`, confirming both fixes at
+once: `"start"` is now processed immediately (not dropped waiting on Deepgram), and the real
+callSid/clientId were correctly recovered from `customParameters` alone with no query string to fall
+back on. `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing, including updated
+`buildConnectTwiml` call sites in `__tests__/telephony/twiml-builders.test.ts` for its new signature),
+`npm run build` all clean.
+
+**Files Modified**: `lib/telephony/stream-handler.ts`, `lib/telephony/twilio.ts`,
+`app/api/telephony/incoming/route.ts`, `app/api/telephony/dequeue/route.ts`,
+`__tests__/telephony/twiml-builders.test.ts`
+
+## Emotion Engine Accuracy Eval + Latency Fix (Scripted Before/After)
+
+**Objective**: `handleTurn()` in `lib/agent/orchestrator.ts` `await`s `detectTextEmotion()` synchronously
+before any LLM work starts on every turn, and `detectTextEmotion()` unconditionally `Promise.all`s Local
+ONNX (raced against a 500ms budget, `CONFIG.emotion.localOnnxLatencyBudgetMs`) and a real HuggingFace
+network call alongside the instant Lexicon engine — even on turns where Lexicon's own selection logic
+already deterministically wins regardless of what the ML engines say. Before touching latency, the user
+asked for a scripted accuracy pass first: build a labeled test set, run it against the *current*
+pipeline, identify which engine is the source of any wrong final answers, decide (my call, explicitly
+delegated) whether any engine should be scrapped, implement the latency fix, and re-run the identical
+script to prove the fix didn't cost accuracy.
+
+**Test harness**: a 24-case labeled set (2 examples per each of the 12 `EmotionLabel` values, deliberately
+mixing captions with obvious lexicon keywords and more naturalistic phrasing meant to fall through to the
+ML engines) run through the real, unmodified `detectTextEmotion()` — not a mock — recording each engine's
+individual answer, the final selected label/engine, correctness against the ground-truth label, and
+latency.
+
+**Before-changes results**: 12/24 correct (50.0%). Breaking down by which engine actually decided the
+turn: Lexicon 7/13 correct (53.8%), Local ONNX 5/11 correct (45.5%), HF never decided a single turn — its
+mocked-in-eval-env latency was ~0ms because no `HUGGINGFACE_API_KEY`/`HF_TOKEN` was set, meaning it
+returned `signal: null` immediately every time, exactly like its documented "no token" degraded state.
+
+**Root-cause breakdown of the misses — two structurally distinct failure sources, not one**:
+1. **Lexicon keyword-matching gaps** (not an ML problem): "I don't understand"/"a bit lost" both matched
+   *frustration* keywords instead of confusion keywords (0/2 on confusion); "ridiculous...forty minutes"
+   matched frustration when the ground truth was anger; "scared this charge...stole" matched a distress
+   keyword ("desperate"-adjacent) over fear; joy vs. excitement keyword overlap caused two flips in both
+   directions. These are lexicon keyword-list tuning gaps, not something the ML engines or a latency
+   change could fix.
+2. **A structural ceiling on the ML engines, not a tuning bug**: the model behind Local ONNX/HF
+   (`j-hartmann/emotion-english-distilroberta-base`) natively outputs 7 classes mapped via
+   `HF_LABEL_MAP` to only 6 of VOXERA's 12 `EmotionLabel`s — it has **no output class at all** for
+   `calm`, `distress`, `confusion`, `gratitude`, or `disappointment`. Every time Lexicon abstained (no
+   keyword match) on a turn whose ground truth was one of those 5 labels, the ML engine was
+   **guaranteed** to answer with the wrong label, because the right answer isn't in its vocabulary. This
+   happened 4 times in the 24-case set (2× `calm`→`neutral`, 1× `distress`→`sadness`, 1×
+   `disappointment`→`excitement`) — a 100% miss rate on that specific subset, exactly matching the
+   pre-existing doc comment in `detect.ts` that already called this out as a known limitation, now
+   confirmed empirically rather than just asserted.
+
+**Engine-scrapping decision (delegated to me by the user)**: scrapped HF (`detectTextEmotionHF`) from the
+live pipeline entirely. Reasoning: HF and Local ONNX are the exact same model
+(`j-hartmann/emotion-english-distilroberta-base`) — HF just runs it over the network instead of
+in-process — so removing it costs zero accuracy diversity by construction, not just per this eval; the
+code's own pre-existing doc comment already described HF as "a fallback for environments where the local
+model failed to load, not a genuinely independent second opinion." In this eval it decided 0/24 turns.
+Kept: Local ONNX and Lexicon — they're complementary (Lexicon reaches the 5 labels ONNX structurally
+can't; ONNX covers turns Lexicon has no keyword for), so scrapping either would be a real accuracy
+regression, not a latency win. Removed per the user's explicit instruction ("remove it from analysis page
+too"): the HF `EngineCard` from `EngineDiagnosticPanel`'s Text Engine Division grid and from
+`EngineAgreementCallout`'s comparison list in `app/_components/EngineDashboard.tsx` (grid now 2-up
+instead of 3-up); the `detectTextEmotionHF` call sites in `lib/emotion/detect.ts` and
+`lib/emotion/emotion-debug.ts` (the diagnostics-panel builder, which had its own duplicate HF-calling
+path for the non-precomputed case). `TextEmotionResult.hf`/`EngineDiagnostic` keep their `hf` field/`"hf"`
+engine-key shape unchanged (now always a fixed always-unavailable stub,
+`{ signal: null, latencyMs: 0, timedOut: false }`) rather than removing the field outright, so every
+existing consumer of these types keeps compiling without a ripple of unrelated changes for a field that's
+simply now permanently empty.
+
+**Latency fix (Option 1 — short-circuit, chosen over the session's other proposed option of a
+per-session emotional-baseline/reuse scheme, which was deferred pending exactly this kind of
+measurement)**: `detectTextEmotion()` now runs Lexicon (synchronous, instant) *first*, and only pays for
+Local ONNX's up-to-500ms latency budget when Lexicon's answer would actually be used — i.e. when Lexicon
+found no real keyword match. On the two paths where Lexicon's answer already wins outright (small-talk
+guard, real keyword match), the function returns immediately without ever calling `detectTextEmotionLocalONNX`
+at all. Previously these two paths still paid the full concurrent `Promise.all` wait alongside Lexicon —
+pure latency waste, since the selection logic was already structured to discard whatever Local ONNX (or
+HF) returned in those cases. This is a correctness-preserving refactor, not a behavior change: the
+selection *decision* is identical, only the amount of pipeline it's forced to wait through before
+returning changed.
+
+**After-changes results**: 12/24 correct (50.0%) — bit-for-bit identical to the before-changes run,
+confirming the latency fix cost zero accuracy, exactly as predicted from reading the selection logic
+before touching any code (Lexicon's early-return branches never depended on Local ONNX's/HF's answer in
+the first place). Latency: average `detectTextEmotion()` call dropped from 21ms to 10ms across the full
+24-case set; more specifically, the 13/24 turns where Lexicon matched a real keyword dropped from paying
+Local ONNX's full ~5-15ms model-inference cost (it still ran and was awaited, just discarded) down to
+~0ms (never invoked at all) — this is the subset that matters most in production, since real caller
+utterances hit an explicit lexicon keyword a majority of the time in this test set. The remaining 11/24
+turns (where Lexicon abstains and Local ONNX's answer is actually used) see no latency change, as
+expected — that work was never wasted to begin with.
+
+**Verification**: `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. `npx vitest run`: 4
+pre-existing tests in `__tests__/emotion/concurrent-engines.test.ts` and
+`__tests__/emotion/emotion-diagnostic.test.ts` failed after the change because they asserted the old
+HF-fallback selection behavior (`selection.engine === "hf"`) that no longer exists by design — rewrote
+both files (concurrent-engines.test.ts fully, emotion-diagnostic.test.ts's HF-specific assertions) to
+mock only Local ONNX (HF is no longer called at all, so nothing to mock) and assert the new short-circuit
+behavior instead (e.g. `expect(mockDetectTextEmotionLocalONNX).not.toHaveBeenCalled()` on a real-keyword
+turn). Full suite: 314 passing, 0 failing. The before/after scripted comparison itself was run via a
+standalone `tsx` harness (not checked into the repo — a throwaway eval script) that imports the real
+`detectTextEmotion()` directly and diffs its output against the 24-case labeled set; both runs used the
+exact same script and cases, only the `detect.ts`/`emotion-debug.ts` code under test changed between
+them.
+
+**Files Modified**: `lib/emotion/detect.ts`, `lib/emotion/emotion-debug.ts`,
+`app/_components/EngineDashboard.tsx`, `__tests__/emotion/concurrent-engines.test.ts`,
+`__tests__/emotion/emotion-diagnostic.test.ts`
+
+## Agent Builder Live-Test Bugs: Voice, Latency, Knowledge Retrieval
+
+**Objective**: user reported 3 separate problems testing a custom Agent Builder agent ("Vikas Verma")
+via the browser "Try a Call" test drawer: (1) the agent spoke in the Deepgram default female voice
+instead of the "Aries" voice explicitly picked and saved for it, (2) response latency was ~10s when
+emotion analysis was expected to run in parallel rather than gate the reply, (3) a PDF uploaded to the
+agent's Knowledge tab (shown "Ready · 66 chunks" in the UI) wasn't actually being used — the agent said
+"I don't have that information" to a direct factual question the PDF answered. Investigated each via
+direct code reading (not guessing) before touching anything; all three turned out to be independent root
+causes, not one shared bug.
+
+**Bug 1 — voice not respected**: `agents.voice_persona` genuinely is saved correctly by the Agent Builder
+UI (`lib/db/agents.ts`'s `AGENT_COLUMNS` includes it and `getAgentWithTenant()` selects it fine) — the
+bug was entirely downstream. `handleTurn()` (`lib/agent/orchestrator.ts`) resolved the agent record but
+only pulled `system_prompt`/`id`/`name` out of it into `resolvedAgent`/`TurnTrace.agent` — `voice_persona`
+was read from the DB and then simply never referenced again. Both TTS call sites confirmed this: the
+browser demo's `server.ts` called `synthesize(output.reply, { policy, emotion })` with no `persona` at
+all, and the Twilio path's `stream-handler.ts` called `synthesizeLinear16(text, { clientId, emotion })`
+— same gap, just a different call site. `lib/deepgram/tts.ts`'s `resolveVoiceModel(persona?)` falls back
+to `CONFIG.deepgram.ttsModel` (`"aura-asteria-en" // Default: female, friendly`) whenever `persona` is
+`undefined` — exactly the "default female voice" reported. Fix: `TurnTrace.agent` now carries
+`voicePersona: agentInfo.voice_persona` alongside `id`/`name`; `server.ts` passes
+`persona: output.trace.agent?.voicePersona` into `synthesize()`, and `stream-handler.ts`'s
+`speakToTwilio()` takes a new `persona` parameter threaded from `output.trace.agent?.voicePersona` into
+`synthesizeLinear16()` — both TTS call sites now honor the agent's own chosen Deepgram voice instead of
+silently falling back to the global default.
+
+**Bug 2 — ~10s latency**: `server.ts` hardcodes `diagnostics: true` on every browser-demo turn (so the
+live test drawer's per-engine breakdown panel has data to show), and `handleTurn()` was running
+`runDiagnosticEmotion()` as a plain serial `await` sitting entirely before retrieval and the LLM call even
+started — the opposite of what the user asked for ("emotion analytics should happen in parallel, but the
+answering should happen ... within 1 sec"). Compounding this: `runDiagnosticEmotion()`'s wav2vec2 acoustic
+ML leg (`lib/emotion/local-audio-detect.ts`) had **no timeout at all**, unlike the text ONNX engine, which
+already races against `CONFIG.emotion.localOnnxLatencyBudgetMs`. The model's own doc comment states its
+real measured cost: "~56s cold load, ~330ms inference once warm" — a cold load could single-handedly stall
+an entire turn with nothing bounding it. Two fixes: (a) added `CONFIG.emotion.localAudioMlLatencyBudgetMs`
+(1500ms) and wrapped the wav2vec2 call in `emotion-debug.ts` in the same `Promise.race`-against-a-timeout
+pattern the text engine already used, so a cold/slow load degrades to "no signal" instead of blocking
+indefinitely; (b) restructured `handleTurn()` so the diagnostics call is kicked off (not awaited) at the
+same point it always ran, then only actually `await`ed right before the trace object is assembled — after
+retrieval, the LLM call, and output guarding have already run. In the common case this await resolves
+instantly, since the diagnostics promise has had the entire retrieval+LLM pipeline's worth of wall-clock
+time to finish concurrently; it only actually waits when diagnostics is unusually slow, and even then it's
+now capped rather than unbounded. Verified live via `/api/turn` (same `handleTurn()` code path, no mic
+needed): `emotionDiagnostics` is still present and correct in the trace (confirms nothing was silently
+dropped), while `timings.emotionMs` no longer reflects a full diagnostics wait.
+
+**A separate, pre-existing latency contributor found during verification, NOT fixed here (flagged, out of
+scope for the 3 reported bugs)**: live testing surfaced `[LLM] Tool-call loop exhausted without a final
+reply — forcing a text-only follow-up` firing on some turns even for plain factual questions with no
+obvious tool need, forcing a second full LLM round trip and, once, a visibly truncated reply ("I don").
+This lives entirely in `lib/agent/llm.ts`'s tool-calling loop and provider fallback (`CONFIG.llm.providers`,
+observed via the `zenmux` fallback provider specifically) — unrelated to the diagnostics-blocking fix
+above, and intermittent (a repeat of the same question against the same agent succeeded cleanly on a
+different provider attempt with `llmMs` dropping from ~6.2s to ~2.5s). Worth a follow-up investigation into
+the tool-choice/tool-call decision heuristics and provider fallback ordering, but is a distinct root cause
+from anything in this fix and wasn't part of what was reported, so left untouched.
+
+**Bug 3 — knowledge/RAG retrieval not surfacing**: retrieval scoping itself was already correct end-to-end
+— confirmed the uploaded PDF's chunks really are stored under the same `clientId` (`tenants.auth_user_id`)
+the agent resolves to at query time (`lib/knowledge/ingest.ts` → `lib/memory/writer.ts`'s
+`seedClientMemory`, `tier: "LTM_client"`), and `retrieve()` (`lib/memory/retrieval.ts`) does query that
+tier scoped by the correct `clientId` on every turn — so this was never a missing-plumbing bug. The actual
+cause: `lib/memory/writer.ts`'s `summarize()` truncates every stored record's `summary` field to its first
+180 characters, and `lib/agent/context.ts`'s `formatRecords()` — the only place retrieved knowledge
+actually reaches the LLM prompt — used `r.summary`, not the full `r.text` that was actually embedded and
+matched. Knowledge chunks are ~500 chars each (`CONFIG.knowledge` chunking), so a fact sitting after the
+first ~180 characters of its chunk (e.g. "Tredence" mentioned partway through a chunk that opens with a
+different employer) was silently dropped before the model ever saw it — and the system prompt's Core Rule
+1 ("answer ONLY using the EVIDENCE block ... if not grounded there, say you do not have that information")
+then correctly, faithfully produced exactly the unhelpful answer the user saw, given what it was actually
+shown. `summary`-based truncation is legitimate for conversational memory records (keeps STM/MTM listings
+compact), but wrong for knowledge-base chunks, where exact wording is the entire point. Fix:
+`formatRecords()` takes a new `{ useFullText?: boolean }` option; the `CLIENT`/knowledge block in
+`buildLLMContext()` now passes `useFullText: true` and uses `r.text` instead of `r.summary`, with its
+truncation budget raised from 1600 to 6000 chars to match (full chunk text runs several times longer than
+a summary). Verified live via `/api/turn` against the real "Vikas Verma" agent and its real uploaded PDF:
+asking "Can you tell me about your experience in Tredence?" now returns "I worked there as an AI Software
+Engineering Intern from May to July 2026 in Bengaluru, focusing on GenAI, RAG, and agent orchestration
+using Python" — a real, correctly-grounded fact pulled straight from the PDF, not the prior "I don't have
+that information" deflection. `trace.retrieved.ltmClientSnippets` in the same response confirms the
+right chunks were retrieved (topic `kb:vikas verma full detail deck`).
+
+**Verification**: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (314 passing, no test changes needed
+for this fix — none of the 3 bugs were covered by existing tests), `npm run build` all clean. Live-verified
+all three fixes together against the real "Vikas Verma" agent (`agents.id=4a7d5dc8-...`,
+`voice_persona="aura-2-aries-en"`, confirmed via a direct Supabase query) through `/api/turn` — the same
+`handleTurn()` code path the browser "Try a Call" demo and Twilio telephony both use, so this exercises
+the actual production turn logic, not a mock: `trace.agent.voicePersona` now correctly returns
+`"aura-2-aries-en"` (bug 1, confirms the value now reaches the point where both TTS call sites read it —
+full audio-out verification needs a real mic/speaker session, which this environment can't drive
+headlessly, so this confirms the data now flows correctly all the way to the TTS call boundary, not the
+literal synthesized audio itself), the Tredence question returns a real grounded answer (bug 3, full
+before/after transcript above), and `emotionDiagnostics` remains present and correct in the trace while no
+longer serially blocking the reply (bug 2).
+
+**Files Modified**: `lib/agent/orchestrator.ts`, `lib/emotion/emotion-debug.ts`, `lib/config.ts`,
+`lib/agent/context.ts`, `server.ts`, `lib/telephony/stream-handler.ts`
