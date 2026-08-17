@@ -625,6 +625,181 @@ attached to the transcript — and fix a reported black/white theme mismatch acr
   the same drawer instance via the custom event. Full live mic + VAD + barge-in flow needs a real
   microphone and a running `npm run server` — outside this sandbox, left for the user to verify.
 
+### 2026-08-17 — Conversation Quality Root-Cause Fixes + Real-Agent Testing + Source of Truth Panel
+
+**Objective**: The Live Test Drawer worked end-to-end but the conversation itself sounded like a
+support script, not a person — reported directly via screenshots showing "Of course — let me help
+you with that right away", identical replies repeated turn after turn, and an escalation offer
+("connect you with a senior specialist") leaking on every distress/sadness turn despite prompt-level
+rules forbidding it. Root-caused and fixed each one via live curl/browser testing rather than
+guessing, and added the ability to test against a real configured agent instead of only the demo
+persona.
+
+**Changes Implemented**:
+1. **Neutral persona rewrite**: was "Professional, efficient, focused" with example text "Of course —
+   let me help you with that right away", which the model reproduced near-verbatim on every plain
+   greeting. Rewritten warm/conversational; `formatPersonaBlock()` now explicitly tells the model its
+   example is a tone reference, never to be copied.
+2. **Lexicon false positive**: `"help me"` was grouped into the same distress-severity regex as
+   `desperate|emergency|urgent|scared|afraid`, so routine requests ("can you help me book an
+   appointment?") were misclassified as maximum-severity distress. Removed.
+3. **No negation handling at all**: `"I'm not feeling good"` matched the bare `good` keyword and
+   scored as pure JOY. `detectTextEmotionLexicon()` (`lib/emotion/detect.ts`) now scans for a negation
+   cue in the ~20 characters before a match and flips positive labels to their negative counterpart
+   (or drops negated negative matches, e.g. "not angry", rather than guessing a replacement).
+4. **Small-talk misclassification**: a bare `"How are you?"` was being classified as CONFUSION,
+   force-gluing "Does that make sense?" onto an unrelated reply via the confusion persona's rules.
+   Added a small-talk guard in `detectTextEmotion()` that forces neutral for whole-utterance greetings
+   when the lexicon found no real keyword hit (genuine distress phrased as a question is untouched),
+   and softened the confusion persona's rule to only fire after an actual multi-step explanation.
+5. **The actual root cause of the escalation-jargon leak**: `guardOutput()` (`lib/agent/guard.ts`)
+   runs *after* the LLM and after an earlier `sanitizeReply()` fix, as a separate output-guard layer —
+   it unconditionally appended `"Let me connect you with a senior specialist now."` whenever escalation
+   was active and the reply didn't match a narrow regex (`connect|transfer|specialist|supervisor|human`),
+   which the newly-humanized persona phrasing ("grab someone from the team") never matched. Fixed the
+   regex to recognize natural hand-off phrasing and changed the fallback sentence to match.
+6. **Escalation offers repeating every turn**: `policyToPrompt()` (`lib/agent/policy.ts`) now takes an
+   `alreadyOfferedHandoff` flag, computed in `buildLLMContext()` by scanning STM for prior hand-off
+   phrasing, and tells the model not to repeat the offer once it's already been made this session.
+7. **Real-agent testing + Source of Truth panel**: new `GET /api/tenants` route and a "Testing: ..."
+   selector in `TestAgentDrawer.tsx` (superseded by Agent Builder's `/api/agents` a few hours later,
+   see below) — test against a real configured tenant's knowledge base and brand-voice memory instead
+   of always the hardcoded demo agent. New collapsible "Source of Truth" panel showing the actual
+   POLICY directives applied and MEMORY written/retrieved for the latest turn.
+8. Fixed a real UI bug: `EngineDiagnosticPanel`'s 4-column grid used a viewport-width breakpoint
+   (`md:grid-cols-4`), not a container-width one, forcing 4 columns into the drawer's ~360px analytics
+   column and overlapping card content. Added a `compact` prop.
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (269 → 281 passing across these commits),
+  `npm run build` — all clean at each step
+- Live-verified via repeated curl against `/api/turn` with a fixed `sessionId`, re-running the exact
+  scenario from the reported screenshots after each fix — confirmed "senior specialist" fully gone
+  (including under the offline-fallback path, which shares the same `guardOutput()`/persona/policy
+  code), "How are you?" now gets a natural reply instead of a confusion-persona non-sequitur, and
+  negated positive text no longer misreads as joy
+
+### 2026-08-17 — Unified Dark Theme for `/demo` + Full-Page Blur Behind the Drawer
+
+**Objective**: The Live Test Drawer used a dark instrument-panel theme while the rest of `/demo`
+stayed in the app's default light theme, so opening the drawer felt like two different products
+stitched together.
+
+**Changes Implemented**:
+- Since every component under `/demo` already reads color through semantic `--color-*` tokens
+  rather than hardcoded palette classes, added one scoping class (`.voxera-demo-dark` in
+  `app/globals.css`) on the page's root `<main>` that redefines those tokens to the existing console
+  values — re-theming Text/Live Call/Acoustic/Phone Call and every panel beneath them with no
+  per-component edits.
+- Fixed two knock-on light-theme leaks this surfaced: `<html>`/`<body>` had a hardcoded light
+  background that flashed on overscroll since neither sits inside the `.voxera-demo-dark` scope on
+  `<main>` — fixed via a `:has()` selector scoped to pages containing that class.
+- Widened the drawer's backdrop (`TestAgentDrawer.tsx`) from a 1px mobile-only dimmer to a full
+  12px blur + 40% scrim across all breakpoints, so opening the drawer visibly blurs the page behind
+  it instead of just sliding a panel over untouched content.
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (281 passing), `npm run build` — all clean
+- Live-verified in-browser: all four `/demo` modes render dark consistently; drawer's blur backdrop
+  confirmed via computed `backdrop-filter: blur(12px)`
+
+### 2026-08-17 — Six Judge-Facing Demo Features
+
+**Objective**: Make `/demo` more convincing to evaluate — expose the concurrent multi-engine
+architecture's disagreement (not just its winner), let a judge scrub back through past turns instead
+of only ever seeing the latest, show real retrieved memory content instead of bare counts, wire real
+per-stage latency into the previously-decorative pipeline visual, add one-click scripted scenarios,
+and roll per-turn data into a session scorecard.
+
+**Changes Implemented**:
+1. **Data plumbing**: `TurnTrace` (`lib/agent/orchestrator.ts`) now carries real per-stage timings
+   (`emotionMs`/`retrievalMs`/`llmMs` measured in the orchestrator, `sttMs`/`ttsMs` measured in
+   `server.ts`) and actual retrieved memory snippets (id/summary/topic/emotion/importance), not just
+   IDs and counts.
+2. **Engine disagreement callout**: `EngineDiagnosticPanel` (`EngineDashboard.tsx`) shows whether
+   HF/Lexicon/Local ONNX actually agreed on a turn's emotion, and why fusion picked what it picked
+   when they didn't.
+3. **Scrubbable reasoning trace**: `TestAgentDrawer.tsx`'s transcript turns are individually
+   clickable — scrub back to any past assistant turn to inspect its full diagnostics/policy/memory.
+   Auto-advances to the newest turn as replies arrive; a "Jump to latest" pill appears when pinned to
+   an older one.
+4. **Visible memory content**: the Source of Truth panel shows actual retrieved memory text (grouped
+   by MTM/LTM-user/client, capped at 3 each) instead of bare counts.
+5. **Real pipeline latency**: a new latency bar (Listen/Analyze/Memory/LLM/Voice) renders for the
+   selected turn using the Phase 1 measurements, replacing the previously-decorative pipeline tracker.
+6. **Stress-test scenarios**: `VoiceAgent.tsx`'s Text mode gets four one-click scripted scenarios
+   (angry escalation, genuine distress, happy news, confused/rambling) that auto-play the full turn
+   sequence at a readable pace.
+7. **Session scorecard**: a live-updating summary (turn count, avg CAI with trend, escalation
+   count/peak level, memories written, dominant emotion) rolls up per-turn data already being
+   collected into a measurable outcome.
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (281 passing), `npm run build` — all clean;
+  WS server (`npm run server`) boots cleanly with the new timing instrumentation
+- Live-verified in-browser: ran the "Angry escalation" scenario end-to-end in Text mode — disagreement
+  callout correctly showed Lexicon/Local ONNX splitting on frustration vs anger, `repeated_frustration`
+  flag fired, tier2 escalation triggered with clean phrasing, CAI and policy traced correctly
+  turn-by-turn. Scrubbable trace / memory snippets / latency bar / scorecard are WS-only (Live Call)
+  features verified via type-checked data flow and code review, not exercised live (needs a real
+  microphone, outside this sandbox).
+
+### 2026-08-17 — Acoustic Sadness Bias + Agent Cutting the Caller Off Mid-Sentence
+
+**Objective**: Two bugs reported from live phone-call testing: the acoustic engine misread
+neutral/joyful/grateful speech as sadness most of the time, and the agent started replying before
+the caller finished a sentence.
+
+**Changes Implemented**:
+1. **Sadness bias**: `inferLabelScored()` (`lib/emotion/audio-emotion.ts`) gave independent,
+   unconditional points toward sadness for low energy OR low pitch OR slow rate OR low pitch
+   variation OR a falling contour — each alone is also just what calm/neutral speech or warm
+   gratitude sounds like (see the gratitude rules a few lines below, and the pre-existing "quiet"
+   soft-nudge comment, which already recognized quietness alone shouldn't assert a label — the main
+   sadness rules contradicted that same principle). Considered switching to a full acoustic embedding
+   model (an external proposal suggested `emotion2vec+` via ONNX) but that's a large, unvalidated
+   undertaking for a bug with a much simpler root cause; also confirmed pitch contour alone can't
+   discriminate sadness, since ordinary declarative English sentences end on a falling pitch. Fixed by
+   requiring energy AND pitch to both be genuinely low together for the primary sadness signal, with
+   variation/contour downgraded to smaller supporting nudges that also require low energy.
+2. **Cutting the caller off**: `is_final` (which `server.ts`'s `onFinalTranscript` acts on to trigger
+   a reply) is governed by Deepgram's `endpointing` parameter, left unset and therefore using
+   Deepgram's short default silence gap — any brief pause or breath was enough to finalize the
+   utterance early. Set `endpointing: 500` in `lib/deepgram/live.ts` (`utterance_end_ms` was already
+   set but is a separate, unused mechanism here).
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (287 passing, 3 new regression tests pinning
+  the reported scenario), `npm run build` — all clean
+- The acoustic fix is verified via targeted unit tests reproducing the exact reported feature
+  combinations (calm/gratitude-toned speech no longer reads as sadness, genuinely low energy+pitch
+  audio still does); the `endpointing` change is a single, well-understood parameter and needs a real
+  call to confirm 500ms feels right in practice — outside this sandbox
+
+### 2026-08-17 — ZenMux as Primary LLM Provider
+
+**Objective**: Add ZenMux ahead of the existing Groq key-rotation setup as the primary LLM provider,
+without touching the Groq fallback logic.
+
+**Changes Implemented**:
+- The entire integration is one new entry in `CONFIG.llm.providers` (`lib/config.ts`):
+  `{ name: "zenmux", envKey: "ZENMUX_API_KEY", baseURL, model }`, placed first. `generateReply()`
+  (`lib/agent/llm.ts`) already iterates providers in array order, builds a fresh `KeyRotator` per
+  provider's `envKey`, and falls through to the next provider on any failure — none of that changed,
+  so Groq's rotation/backoff/retry behavior is exactly what it was.
+- `baseURL`/`model` are env-overridable (`ZENMUX_BASE_URL`/`ZENMUX_MODEL`) since ZenMux's model
+  catalog is account-specific. `KeyRotator` is generic over any comma-separated env var, so ZenMux
+  gets multi-key rotation, timeouts, and exponential backoff on 429/5xx for free.
+- Documented in `.env.example`/`.env.local.example`. No key hardcoded anywhere.
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (292 passing, 5 new tests mocking the `openai`
+  SDK), `npm run build` — all clean
+- Live-verified end-to-end with a real ZenMux key: confirmed the priority order (`zenmux` tried
+  first), automatic fallback to Groq on a real `402` (account balance) error, and a fully successful
+  ZenMux completion once pointed at a model the account could actually use — `[LLM] Success via
+  provider: zenmux` with a real generated reply routed through the exact same orchestrator pipeline
+
 ### 2026-08-17 — Agent Builder
 
 **Objective**: Let a signed-up user create multiple custom voice agents (name, system prompt,
@@ -694,3 +869,57 @@ base memory records.
   connection and login session — outside this sandbox, left for the user to verify after applying
   `sql/migration_v11.sql`.
 
+
+### 2026-08-17 — Onboarding Redesign: Simple, Vapi-Style Agent Creator
+
+**Objective**: The onboarding wizard (industry dropdown, workflow dropdown, operating hours,
+escalation-string field, subscription plan picker) never actually fed the real agent architecture —
+it wrote to a separate `business_settings` row and inserted a legacy `agents` row using columns that
+don't exist on that table (`opening_time`/`closing_time`), so it was already partially broken.
+Replaced it with a simple 4-step flow that creates a real Agent Builder agent: describe your
+business, write or AI-generate the prompt, optionally attach files for RAG, review and create.
+
+**Changes Implemented**:
+1. **Basics → Prompt → Knowledge → Review**, `app/onboarding/planner.tsx` rewritten from scratch.
+   Basics is business name + agent name (optional) + a free-text description — the only required
+   input.
+2. **AI prompt generation**: new `POST /api/onboarding/generate-prompt` calls the existing
+   `generateReply()` (same ZenMux → Groq → OpenAI fallback pipeline, not a duplicate LLM path) with a
+   prompt-writing system instruction and the user's description, explicitly told not to invent facts
+   beyond what was described. `generateReply()` gained two optional, backward-compatible params —
+   `maxOutputTokens` and `useTools` — since the default 160-token cap and forced tool-calling are
+   tuned for live voice turns, not one-off prompt drafting; every existing caller is unaffected.
+3. **Knowledge**: optional drag-and-drop file upload straight into the existing
+   `POST /api/knowledge/upload` (unchanged) — ingests into the account's shared `LTM_client`
+   knowledge base, which every agent under that account already draws on via `buildLLMContext()`'s
+   CLIENT block, so this needed zero new ingestion code.
+4. **Create**: `POST /api/onboarding` rewritten to just ensure a tenant row exists (same upsert
+   logic as before, extracted into `lib/db/onboarding.ts`'s `createFirstAgent()`) and create one
+   agent under it via the existing `createAgent()` helper (`lib/db/agents.ts`). No more
+   `business_settings` write, no more broken `agents`-table insert.
+5. Success page (`app/onboarding/success/page.tsx`) now deep-links to `/demo?agentId=<id>`
+   (`TestAgentDrawer` already reads this from the Agent Builder work) so a brand-new agent can be
+   talked to immediately, plus a link to Agent Builder to keep refining it.
+
+**Deliberately dropped**: industry/workflow taxonomy, the AI-recommendation side panel, operating
+hours, and the Stripe plan-picker step — none of it fed the actual agent, and simplicity was the
+explicit ask. Billing can be wired up separately if wanted.
+
+**Files Created**:
+- `app/api/onboarding/generate-prompt/route.ts` — AI prompt drafting
+- `__tests__/db/onboarding.test.ts` — `createFirstAgent()` tenant reuse/creation/failure paths
+
+**Files Modified**:
+- `lib/db/onboarding.ts` — rewritten: `createFirstAgent()` replaces `processOnboarding()`
+- `app/api/onboarding/route.ts` — simplified schema and handler
+- `app/onboarding/planner.tsx`, `app/onboarding/page.tsx`, `app/onboarding/success/page.tsx`
+- `lib/agent/llm.ts` — `maxOutputTokens`/`useTools` optional params on `generateReply()`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (296 passing, 4 new unit tests),
+  `npm run build` — all clean
+- Live-verified: both new API routes correctly reject unauthenticated requests
+  (`401`/"Unauthorized"); `/onboarding` correctly redirects to `/login` when signed out (pre-existing
+  middleware, unaffected by this change). Could not visually exercise the wizard itself or a real
+  create-agent submission — this sandbox has no reachable Supabase connection to log in, same
+  limitation as the Agent Builder work.
