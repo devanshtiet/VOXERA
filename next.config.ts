@@ -3,6 +3,17 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   /**
+   * pdf-parse (via pdfjs-dist) dynamically resolves its own worker script
+   * (pdf.worker.mjs) relative to a real node_modules path at runtime. When
+   * Next.js bundles it into a hashed .next/dev/server/chunks/ path instead,
+   * that resolution breaks — "Setting up fake worker failed: Cannot find
+   * module '.../.next/dev/server/chunks/pdf.worker.mjs'" on every PDF
+   * knowledge-base upload. Marking it external skips bundling for server
+   * code, so Node's normal require/import resolves it from its real
+   * location in node_modules instead.
+   */
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist"],
+  /**
    * Next.js blocks cross-origin dev requests (including the HMR websocket
    * at /_next/webpack-hmr) unless the requesting origin is explicitly
    * allowlisted. Without this, opening the dev server via a LAN IP

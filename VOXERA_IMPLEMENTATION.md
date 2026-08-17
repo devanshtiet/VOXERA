@@ -1315,3 +1315,36 @@ entry — none were found by manual grep alone.
   "ACOUSTIC ENGINE DIVISION" both render as separate labeled sections with real data, HF correctly
   shows its genuine "unavailable (no token or error)" state, fusion callout correctly shows "LEXICON
   SELECTED"
+
+### 2026-08-17 — PDF Knowledge Upload: "Setting up fake worker failed" Under Turbopack Dev
+
+**Objective**: User hit `Module not found: Can't resolve './KnowledgeTab'` first — a stale Turbopack
+dev cache (same class of bug as the earlier `AgentStatusBanner` false positive), fixed by the standard
+`rm -rf .next` + restart. After that, uploading a PDF into the new Knowledge tab surfaced a second,
+real error: `Setting up fake worker failed: "Cannot find module '.../.next/dev/server/chunks/
+pdf.worker.mjs' imported from .../.next/dev/server/chunks/node_modules_pdfjs-dist_legacy_build_pdf_
+mjs_....js"`.
+
+**Root Cause**: `pdf-parse` v2 uses `pdfjs-dist` under the hood, which dynamically resolves its own
+worker script (`pdf.worker.mjs`) relative to a real `node_modules` path at runtime. Turbopack (and
+Webpack) bundle server-side dependencies into hashed chunk files under `.next/dev/server/chunks/` by
+default — once `pdfjs-dist` is bundled that way, its worker-path resolution point at a chunk path that
+never actually contains the worker file, so every PDF upload failed at the parsing step specifically
+(text/markdown/csv/json uploads, which don't touch `pdf-parse`, were unaffected — matches why the
+earlier live-verified markdown ingest test passed cleanly while this only surfaced on a real PDF).
+
+**Fix**: Added `serverExternalPackages: ["pdf-parse", "pdfjs-dist"]` to `next.config.ts` — the
+documented Next.js mechanism for excluding a package from server-side bundling, so Node's normal
+`require`/`import` resolves it (and its worker file) from its real location in `node_modules` instead.
+
+**Files Modified**: `next.config.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (308 passing), `npm run build` — all clean
+- Live-verified against the actual dev server (not just a production build, since the bug is
+  Turbopack-dev-specific): restarted the dev server fresh with `rm -rf .next` so the config change
+  took effect, added a temporary diagnostic API route that parses a minimal hand-built PDF via the
+  same `pdf-parse` `PDFParse` class `lib/knowledge/ingest.ts` uses, hit it through the real running
+  server — before this fix this reproduces the exact reported "fake worker" error; after the fix it
+  returned `{"ok":true,"text":"Hello PDF worker test..."}`. Diagnostic route deleted after verification,
+  not part of the shipped change.
