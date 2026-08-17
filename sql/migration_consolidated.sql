@@ -306,6 +306,16 @@ CREATE POLICY "Tenants can manage their own memories" ON public.memories
     FOR ALL USING (auth.uid()::text = "clientId");
 
 -- Vector similarity search function — final shape from migration_v9.sql.
+-- The argument list has been identical since migration.sql (only the
+-- RETURNS TABLE columns grew in v9), but Postgres derives the function's
+-- row type from those RETURNS TABLE / OUT-parameter columns and refuses to
+-- change that shape via CREATE OR REPLACE — it errors with "cannot change
+-- return type of existing function" if an older version (e.g. one created
+-- before migration_v9.sql was applied, missing importance_score/
+-- retrieval_count/last_retrieved_at) already exists. Dropping first by the
+-- exact original argument signature makes this safe to run regardless of
+-- which version, if any, is already there.
+DROP FUNCTION IF EXISTS public.match_memories(vector, double precision, integer, text, text, text);
 CREATE OR REPLACE FUNCTION match_memories(
   query_embedding vector(1536),
   match_threshold float,
