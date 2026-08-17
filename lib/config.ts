@@ -134,6 +134,16 @@ export const CONFIG = {
     diagnosticMode: false,
     /** Strict latency budget (ms) for the HuggingFace API call. */
     hfLatencyBudgetMs: 200,
+    /**
+     * Latency budget (ms) for the local ONNX text-emotion model
+     * (lib/emotion/local-emotion-classifier.ts). Higher than the HF budget
+     * because it's a one-time model-load cost on cold start, not a per-call
+     * network round trip — once warm it typically finishes in single-digit
+     * ms. Doesn't actually cancel the in-flight classification (JS can't
+     * abort mid-inference), just stops the production turn from waiting on
+     * it past this point.
+     */
+    localOnnxLatencyBudgetMs: 500,
     /** Maximum audio confidence for short utterances (<5s). */
     audioConfidenceCeiling: 0.75,
     /** Maximum audio confidence for long utterances (>8s) with clear patterns. */

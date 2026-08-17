@@ -1390,3 +1390,68 @@ now-expanded TXT/PDF/Markdown/CSV/JSON/DOCX support from the earlier entry in th
 - Could not visually click through the authenticated `/admin/*` pages in this pass — same limitation
   noted in earlier entries, this sandbox has no login credentials for the admin dashboard. Recommend a
   manual pass in a running dev server across all six pages before considering this fully verified.
+
+### 2026-08-17 — Text Emotion Routing: Local ONNX Was Wired Up But Never Used
+
+**Objective**: User's screenshot of the live analysis panel showed every turn in a real conversation
+(happy, curious, small-talk) landing on "Confusion" via Lexicon, while Local ONNX sat right next to it
+confidently saying "Joy" (99%) — completely ignored. They asked why HuggingFace shows greyed out, and
+whether Local ONNX is secretly the same thing shown twice.
+
+**Root cause, confirmed by reading the code, not guessed**: HuggingFace and Local ONNX genuinely run
+the identical model — `j-hartmann/emotion-english-distilroberta-base` — HF calls it remotely via
+HuggingFace's Inference API (needs `HF_TOKEN`, network round trip), Local ONNX runs it in-process via
+`@xenova/transformers` (no token, no network, ~9ms once warm). HF greys out simply because no
+`HF_TOKEN` is configured — by design, not a bug. The real bug: `detectTextEmotion()`
+(`lib/emotion/detect.ts`) only ever raced HF vs Lexicon — Local ONNX was computed solely for the
+diagnostics panel's side-by-side comparison and never had any influence on the actual selected result,
+despite being reliable and dependency-free.
+
+**First attempt was wrong, caught by the test suite**: initially just flipped priority to "Local ONNX
+wins whenever it returns a signal." This broke 11 passing regression tests. Investigating why (not
+just loosening the assertions) surfaced a real, structural problem: the 7-class model behind
+Local ONNX/HF maps to only 6 of VOXERA's 12 emotion labels via `HF_LABEL_MAP` (anger, frustration,
+fear, joy, neutral, excitement) — it has **no output class at all** for `distress`, `gratitude`,
+`confusion`, `disappointment`, or `calm`. Concretely: for "How am I supposed to deal with this, I'm
+scared and desperate?" the lexicon correctly matches `distress` (0.75 conf, real keyword hits); Local
+ONNX confidently says `fear` (0.98 conf) — not because it disagrees, but because it structurally
+cannot say `distress`. Since `distress` drives safety/escalation handling elsewhere in the pipeline,
+blindly trusting higher ML confidence here would have been a real regression, not just a labeling
+nuance.
+
+**Fix**: `detectTextEmotion()`'s selection logic is now: **lexicon wins outright whenever it produced
+a real keyword match** (deliberate, hand-tuned, including negation handling neither ML model has an
+equivalent for) — the ML model (Local ONNX, preferred; HF as fallback) only gets to decide when the
+lexicon found nothing and is sitting on its bare `neutral` default. This is exactly the situation Local
+ONNX is strictly better for (previously that bare default, e.g. confidence 0.5 flat, is now replaced by
+a real classification, often >0.9 confidence). `lib/emotion/emotion-debug.ts`'s diagnostic-mirror logic
+and `lib/agent/orchestrator.ts` (which previously ran Local ONNX a second, redundant time purely for
+diagnostics) were updated to match. Live-verified against the exact conversational pattern from the
+screenshot — previously-uniform "Confusion" readings now correctly vary (excitement/neutral/joy) and
+match what a human would actually read from the text.
+
+**UI**: `EngineDashboard.tsx`'s engine cards now carry honest subtitles — HuggingFace: "Cloud API · same
+model as Local ONNX", Local ONNX: "On-device · same model as HuggingFace", Lexicon: "Rule-based
+keywords", Acoustic: "Heuristic DSP scoring, not a pretrained model" (there is no real pretrained
+acoustic model — e.g. emotion2vec+ — integrated anywhere in this codebase; a past commit explicitly
+considered and deferred that as "a large, unvalidated undertaking", still true). The "X selected" badge
+in the Final Result panel now renders a proper display name (e.g. "Local ONNX") instead of the raw
+`local_onnx` selection-engine string.
+
+**Files Modified**: `lib/emotion/detect.ts`, `lib/emotion/emotion-debug.ts`, `lib/agent/orchestrator.ts`,
+`lib/config.ts`, `app/_components/EngineDashboard.tsx`, `__tests__/emotion/concurrent-engines.test.ts`,
+`__tests__/emotion/detect.test.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (309 passing) — all clean
+- Investigated all 11 initial test failures individually rather than updating assertions blindly;
+  fixed the 3 that were mock-setup gaps (tests needed to also mock Local ONNX, matching the existing
+  ml-detect mocking pattern) and updated 1 exact-confidence assertion that was specifically pinned to
+  the lexicon's hardcoded 0.5 default, now correctly superseded by a real ONNX classification
+- Live-verified via a standalone script reproducing the screenshot's exact conversational turns —
+  confirmed the "everything reads as Confusion" bug is gone and results now vary correctly
+- Live browser verification against the running dev server's `/demo` page: sent "I'm feeling really
+  good about this, thank you so much!", confirmed Local ONNX (99% conf, 60ms) and Lexicon (69% conf,
+  keyword match on "good, thank you") both correctly say Joy, HF correctly shows its genuine
+  unavailable state with the new subtitle, and the Final Result badge correctly renders "LEXICON
+  SELECTED" with an accurate, specific reason string

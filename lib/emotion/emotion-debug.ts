@@ -202,23 +202,42 @@ export async function runDiagnosticEmotion(
       }
     : null;
 
-  // Mirror the production selection logic in detect.ts:detectTextEmotion() exactly,
-  // so `fusion.textSelection` reflects what the live pipeline actually chose.
+  // Mirror the production selection logic in detect.ts:detectTextEmotion()
+  // exactly — lexicon wins outright on any real keyword match (deliberate,
+  // hand-tuned, and the only way to reach the 5 labels the ML model's
+  // 7-class output space can't express at all); the ML model only decides
+  // when the lexicon found nothing — so `fusion.textSelection` reflects what
+  // the live pipeline actually chose.
   const textSelection: TextEmotionResult["selection"] =
-    hfResult.signal && !hfResult.timedOut
+    lexiconResult.matchedKeywords.length > 0
       ? {
-          engine: "hf",
-          reason: `HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
-        }
-      : {
           engine: "lexicon",
-          reason: hfResult.timedOut
-            ? `HF timed out after ${hfResult.latencyMs.toFixed(1)}ms, using lexicon fallback`
-            : hfResult.signal === null
-              ? "HF unavailable (no token or error), using lexicon"
-              : "HF returned no signal, using lexicon",
-        };
-  const textPrimary = textSelection.engine === "hf" && hfResult.signal ? hfResult.signal : lexiconResult;
+          reason: `Lexicon matched keyword(s) [${lexiconResult.matchedKeywords.join(", ")}] → label=${lexiconResult.label}`,
+        }
+      : localOnnxResult.signal
+        ? {
+            engine: "local_onnx",
+            reason: `Lexicon found no keyword match; Local ONNX returned in ${localOnnxResult.latencyMs.toFixed(1)}ms with label=${localOnnxResult.signal.label} conf=${localOnnxResult.signal.confidence.toFixed(3)}`,
+          }
+        : hfResult.signal && !hfResult.timedOut
+          ? {
+              engine: "hf",
+              reason: `Lexicon found no keyword match; Local ONNX unavailable, HF returned in ${hfResult.latencyMs.toFixed(1)}ms with label=${hfResult.signal.label} conf=${hfResult.signal.confidence.toFixed(3)}`,
+            }
+          : {
+              engine: "lexicon",
+              reason: localOnnxResult.errored
+                ? "Lexicon found no keyword match; Local ONNX errored and HF unavailable (no token or error), using lexicon default"
+                : hfResult.timedOut
+                  ? "Lexicon found no keyword match; Local ONNX and HF both unavailable/timed out, using lexicon default"
+                  : "Lexicon found no keyword match; Local ONNX and HF both unavailable (no token or error), using lexicon default",
+            };
+  const textPrimary =
+    textSelection.engine === "local_onnx" && localOnnxResult.signal
+      ? localOnnxResult.signal
+      : textSelection.engine === "hf" && hfResult.signal
+        ? hfResult.signal
+        : lexiconResult;
   const final = fuseEmotion(textPrimary, audioSignal);
 
   return {
