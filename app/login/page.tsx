@@ -1,11 +1,25 @@
 import { login } from "./actions";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { redirect } from "next/navigation";
+import { createClient } from "../../lib/db/server";
 
 export default async function LoginPage(props: {
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const searchParams = await props.searchParams;
+
+  // Already signed in with a valid session — go straight to the dashboard
+  // instead of showing the login form again. This is what was missing:
+  // opening /login (or being sent here) with a live session previously
+  // always re-prompted for credentials rather than recognizing you were
+  // already authenticated.
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    redirect("/admin");
+  }
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-[var(--color-bg-base)] font-body text-[var(--color-text-primary)]">
       {/* Background ambient glow */}
