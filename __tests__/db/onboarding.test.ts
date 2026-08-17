@@ -115,6 +115,6 @@ describe("createFirstAgent — failure paths", () => {
       { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.tenants' in the schema cache" } },
     ]);
 
-    await expect(createFirstAgent(db, "user-5", payload)).rejects.toThrow(/migration_v11\.sql/);
+    await expect(createFirstAgent(db, "user-5", payload)).rejects.toThrow(/migration_consolidated\.sql/);
   });
 });

@@ -41,12 +41,13 @@ export async function createFirstAgent(
     // PGRST116 = "no rows found", expected for a brand-new account — any
     // other error here is a real failure worth surfacing. PGRST205
     // specifically means PostgREST can't find the table at all — almost
-    // always because sql/migration_v2.sql (which creates `tenants`) was
-    // never run against this Supabase project, not a bug in this code.
+    // always because the schema migrations were never run against this
+    // Supabase project, not a bug in this code.
     const hint =
       tErr.code === "PGRST205"
-        ? " — the `tenants` table doesn't exist in this Supabase project yet. Run sql/migration.sql " +
-          "through sql/migration_v11.sql, in order, in the Supabase SQL Editor."
+        ? " — the `tenants` table doesn't exist in this Supabase project yet. Run " +
+          "sql/migration_consolidated.sql (one idempotent file covering every migration) in the " +
+          "Supabase SQL Editor."
         : "";
     throw new Error(`Failed to check tenant: ${tErr.message}${hint}`);
   }
