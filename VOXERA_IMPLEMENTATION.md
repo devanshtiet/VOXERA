@@ -1574,3 +1574,43 @@ acoustic card) and "Acoustic (Wav2Vec2)" (subtitle: "Pretrained SER model, on-de
 - Could not test with real microphone audio in this sandbox (no mic access) — recommend a manual pass
   via `TestAgentDrawer.tsx`'s "Live Test Call" in a real browser session to see real classifications
   and compare the two acoustic engines' agreement/disagreement on genuine speech
+
+### 2026-08-17 — Attach Files to the AI-Generate New Agent Flow
+
+**Objective**: User asked to add file attachment to the "New Agent" → AI-generate dialog, so the
+drafted agent is informed by real business documents (pricing sheets, FAQs, policy docs), not just the
+short description text box.
+
+**Design**: reused existing, already-tested infrastructure rather than building a parallel upload path
+— attached files go through the same `/api/knowledge/upload` → `ingestDocument()` pipeline the
+standalone Knowledge Base page and Agent Builder's Knowledge tab already use. This means uploaded files
+serve double duty: they become real, searchable knowledge for the account (available to any agent
+during live calls, per the existing shared-per-account knowledge model) *and* their extracted text
+grounds the AI-drafted prompt in real specifics. Added `extractedTextPreview` (first 4000 chars of the
+extracted text) to `ingestDocument()`'s return value — a small, additive change; the upload route
+already returns `ingestDocument()`'s result directly, so no route change was needed for it to reach the
+client. `/api/admin/agents/generate` gained an optional `fileContext` field (capped at 8000 chars
+combined across files), inserted into the LLM's user message as a `REFERENCE MATERIAL` block, with the
+generator's system prompt updated to explicitly prefer citing concrete specifics (real prices, hours,
+service names) from that block over generic language when it's present.
+
+**UI**: `CreateAgentDialog.tsx` gained a drag-and-drop multi-file upload zone (same accepted formats as
+the Knowledge tab: TXT/PDF/MD/CSV/JSON/DOCX) between the description textarea and the Generate button,
+with per-file upload status (pending/uploading/done/error) and a remove button. On Generate, any
+not-yet-uploaded files are uploaded first, then their extracted text is concatenated into the
+`fileContext` sent alongside the description.
+
+**Files Modified**: `lib/knowledge/ingest.ts`, `app/api/admin/agents/generate/route.ts`,
+`app/admin/agents/CreateAgentDialog.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing), `npm run build` — all clean
+- Live-verified `ingestDocument()`'s new `extractedTextPreview` field against a real markdown file
+  through the actual Supabase project (confirmed correct content, then cleaned up the test document)
+- Live-verified the full generation flow with a standalone script hitting the real `generateReply()`
+  pipeline with a `REFERENCE MATERIAL` block containing specific prices/hours/policy — the model's
+  drafted `system_prompt` correctly cited the exact figures ($80 cleaning, $250 whitening, the exact
+  hours, the walk-in policy) instead of generic filler, confirming the file content actually reaches
+  and is used by the LLM, not just passed through inertly
+- Could not click through the dialog itself in this sandbox (behind login, no credentials available) —
+  recommend a manual pass attaching a real file and confirming the generated draft reflects it

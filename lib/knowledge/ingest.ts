@@ -11,6 +11,12 @@ export interface IngestResult {
   clientId: string;
   chunkCount: number;
   chunkIds: string[];
+  /** First ~4000 chars of the extracted text — lets a caller (e.g. Agent
+   * Builder's AI-generate flow) ground an LLM prompt in the document's real
+   * content without a second read/extraction pass. Not chunk-boundary-aware,
+   * just a raw prefix — fine for "give the model some real context," not
+   * meant as a faithful excerpt. */
+  extractedTextPreview: string;
 }
 
 /**
@@ -150,7 +156,7 @@ export async function ingestDocument(args: {
       throw readyError;
     }
 
-    return { documentId, clientId, chunkCount: chunks.length, chunkIds };
+    return { documentId, clientId, chunkCount: chunks.length, chunkIds, extractedTextPreview: rawText.slice(0, 4000) };
   } catch (err: any) {
     const errMsg = err instanceof Error ? err.message : String(err);
     
