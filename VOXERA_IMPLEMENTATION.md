@@ -1112,3 +1112,40 @@ genuinely no way to see whether "Mia" was found or the turn silently fell back t
   resolved + LLM succeeded) — each produces the correct, unambiguous message
 - Could not click through this live in-browser — the live-call path needs a real microphone and a
   running `npm run server`, outside this sandbox
+
+### 2026-08-17 — Root Cause of "No LLM Provider Responded": Groq Deprecated Its Model
+
+**Objective**: The new agent-status banner (previous entry) correctly surfaced "No LLM provider
+responded" on every turn, but the underlying cause was still unknown — user suspected a key problem.
+
+**Root Cause**: Confirmed live via direct API calls with the real Groq key: `llama-3.3-70b-versatile`
+(the hardcoded model in `CONFIG.llm.providers`) returns `400 model_not_found — does not exist or you
+do not have access to it`. Groq has fully removed this model from their catalog since it was
+originally configured. This was silent for every single turn all session — Groq was never actually
+generating a reply, it was failing instantly (fast rejection, not a real completion) and falling
+through to whatever provider came next, or to the offline fallback if nothing else was configured/
+working either.
+
+**Changes Implemented**:
+- `lib/config.ts`: Groq's model changed to `openai/gpt-oss-120b` (verified live: clean chat
+  completions and correct structured `tool_calls` output, not leaked text), and made env-overridable
+  via `GROQ_MODEL` (matching the existing `ZENMUX_MODEL` pattern) since Groq's available models change
+  faster than most providers here.
+- `lib/db/agents.ts`: `getAgentWithTenant()` was silently swallowing its Supabase error and returning
+  `null` on any failure — found while investigating a separate "custom agent not found server-side"
+  report. This made that class of bug undiagnosable (no indication in logs of *why* a lookup failed:
+  RLS denial vs wrong key vs missing tenant join vs genuinely not found). Now logs the specific
+  Supabase error code/message (except the expected "no rows" case) so a future occurrence is
+  immediately diagnosable from the `npm run server` terminal instead of a silent fallback.
+
+**Files Modified**: `lib/config.ts`, `lib/db/agents.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (305 passing — the two e2e test files with
+  hardcoded `"llama-3.3-70b-versatile"` strings are self-contained mocks of `generateReply()` itself,
+  unrelated to the real config, confirmed by inspection, left unchanged), `npm run build` — all clean
+- Live-verified the new model directly against Groq's API: a real chat completion, and a real
+  structured tool-call response (not leaked `<function>` text) for a booking-style request
+- Live-verified through the actual `generateReply()` pipeline with ZenMux disabled to force the Groq
+  path specifically: `[LLM] Success via provider: groq`, `model: openai/gpt-oss-120b`, real generated
+  reply text

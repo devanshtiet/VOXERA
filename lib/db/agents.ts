@@ -45,16 +45,36 @@ function unwrapTenant(row: any): string | undefined {
 }
 
 /** Used by the orchestrator/server.ts to resolve an agentId into its custom
- * prompt and the tenant clientId that scopes its knowledge base. */
+ * prompt and the tenant clientId that scopes its knowledge base. Logs the
+ * real reason on failure — this previously returned null silently on any
+ * Supabase error (RLS block, wrong key, missing tenant join, etc.), which
+ * made "the agent isn't being picked up" completely undiagnosable: the
+ * caller just saw a silent fallback to the demo agent with zero indication
+ * of why the lookup actually failed. */
 export async function getAgentWithTenant(db: SupabaseClient, agentId: string): Promise<AgentWithTenant | null> {
   const { data, error } = await db
     .from("agents")
     .select(`${AGENT_COLUMNS}, tenants!inner(auth_user_id)`)
     .eq("id", agentId)
     .single();
-  if (error || !data) return null;
+  if (error) {
+    // PGRST116 = no rows matched — the expected, silent case for a bad/
+    // deleted agentId. Anything else (RLS denial, connection failure, a
+    // schema mismatch) is a real problem worth surfacing loudly.
+    if (error.code !== "PGRST116") {
+      console.error(`[lib/db/agents] getAgentWithTenant(${agentId}) failed:`, error.message, `(code: ${error.code})`);
+    }
+    return null;
+  }
+  if (!data) return null;
   const tenantAuthUserId = unwrapTenant(data);
-  if (!tenantAuthUserId) return null;
+  if (!tenantAuthUserId) {
+    console.error(
+      `[lib/db/agents] getAgentWithTenant(${agentId}) found the agent row but its tenant join returned no ` +
+        `auth_user_id — the agent's tenant_id likely doesn't match any row in tenants, or that tenant has no auth_user_id set.`
+    );
+    return null;
+  }
   const { tenants, ...agent } = data as any;
   return { ...agent, tenant_auth_user_id: tenantAuthUserId };
 }

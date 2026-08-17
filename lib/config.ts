@@ -55,7 +55,20 @@ export const CONFIG = {
         model: process.env.ZENMUX_MODEL || "openai/gpt-4o-mini",
         envKey: "ZENMUX_API_KEY",
       },
-      { name: "groq", baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", envKey: "GROQ_API_KEYS" },
+      {
+        name: "groq",
+        baseURL: "https://api.groq.com/openai/v1",
+        // Was hardcoded to "llama-3.3-70b-versatile", which Groq has since
+        // fully removed from their catalog (confirmed live: every request
+        // returned a 400 "does not exist or you do not have access to it"
+        // — every single turn silently fell through past Groq to whatever
+        // came after it, all session). Groq's available models change
+        // over time faster than most providers here, so this is now
+        // env-overridable like ZenMux's — check `GET /openai/v1/models`
+        // with your key if this one goes stale too.
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+        envKey: "GROQ_API_KEYS",
+      },
       { name: "openai", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini", envKey: "OPENAI_API_KEY" },
     ] as Array<{ name: string; baseURL: string; model: string; envKey: string }>,
     maxInputTokens: 6000,
