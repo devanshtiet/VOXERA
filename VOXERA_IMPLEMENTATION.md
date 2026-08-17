@@ -1455,3 +1455,57 @@ in the Final Result panel now renders a proper display name (e.g. "Local ONNX") 
   keyword match on "good, thank you") both correctly say Joy, HF correctly shows its genuine
   unavailable state with the new subtitle, and the Final Result badge correctly renders "LEXICON
   SELECTED" with an accurate, specific reason string
+
+### 2026-08-17 — Acoustic Sensitivity Calibration Slider, and a Real Pre-Existing WS Bug It Surfaced
+
+**Objective**: User asked for a manual slider/knob to calibrate the acoustic engine's known tendency
+to over-read ambiguous audio as negative, as part of the same round of feedback on the live analysis
+page.
+
+**Design**: A `-1..1` bias (default 0, no behavior change) applied as a real scoring adjustment inside
+`inferLabelScored()` (`lib/emotion/audio-emotion.ts`) — positive values add to
+joy/gratitude/excitement/calm and subtract from sadness/distress/fear/anger/frustration/disappointment
+before the winning label is picked, so it can flip borderline cases (verified: the same audio reads as
+`sadness` at bias=0 and `calm` at bias=+1) rather than just cosmetically shifting a reported VAD number
+after the fact. Threaded through `TurnInput`/`handleTurn()` (`lib/agent/orchestrator.ts`) and
+`/api/turn`'s zod schema for the text-mode demo path, though that path never actually has
+`acousticFeatures` to begin with (text-only input has no audio) — the slider only does anything where
+real audio is involved.
+
+**The real audio path doesn't go through `/api/turn` at all** — `TestAgentDrawer.tsx`'s "Live Test
+Call" (the exact UI in the user's screenshot) talks to `server.ts`'s WebSocket server directly, which
+extracts real acoustic features server-side and calls `handleTurn()` itself. Added a
+`set_sensitivity_bias` WS control message type, a per-connection `sensitivityBias` variable in
+`server.ts`, and the matching slider UI + `ws.send()` call in `TestAgentDrawer.tsx`.
+
+**Found a real, pre-existing bug live-testing the WS wiring, not from code review**: sent
+`set_sensitivity_bias` to a running server and it never took effect — server logs showed it being
+counted as an audio chunk instead. `server.ts`'s message handler distinguished binary audio from JSON
+text control messages via `Buffer.isBuffer(message)`, but this version of the `ws` library delivers
+**both** binary and text frames as `Buffer` objects — confirmed by temporarily logging the handler's
+actual `isBinary` argument (which the handler took but never read) alongside `Buffer.isBuffer()`: for
+a genuine text frame, `isBuffer=true, isBinary=false`. This means every client-sent text control
+message — `ping`, `barge_in`, and now `set_sensitivity_bias` — had been silently misrouted into the
+"it's audio" branch this whole time: fed to Deepgram as garbage PCM, pushed into `turnAudioChunks`
+polluting acoustic feature extraction, and never reaching the `JSON.parse` branch at all. Fixed by
+discriminating on `isBinary` (with `Buffer.isBuffer()` kept alongside purely for TypeScript's benefit,
+narrowing `RawData` to `Buffer` for the calls that need it).
+
+**Files Modified**: `lib/emotion/audio-emotion.ts`, `lib/agent/orchestrator.ts`, `app/api/turn/route.ts`,
+`app/_components/VoiceAgent.tsx`, `app/_components/TestAgentDrawer.tsx`, `server.ts`,
+`__tests__/emotion/acoustic-scored-inference.test.ts`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (312 passing, 3 new), `npm run build` — all clean
+- New regression tests directly on `detectAudioEmotion()`: bias=0 is a true no-op vs. no options passed
+  at all; a specific borderline fixture flips from `sadness` to `calm` at bias=+1 (proving the bias is a
+  real scoring effect, not cosmetic); an out-of-range bias (5) clamps to the same result as bias=1
+- Live-verified the WS control-message fix against a real running `npm run server` instance with a
+  standalone WebSocket test client: before the fix, `set_sensitivity_bias` was silently swallowed and
+  counted as an audio chunk (`audioChunksReceived=1`); after the fix, the server log shows
+  `[Server] Sensitivity bias set to 0.7.` and a separate `ping` correctly receives a `pong`, with
+  `audioChunksReceived=0` for that connection — confirming text control messages no longer leak into
+  the audio path
+- Could not test the full real-microphone path (getUserMedia audio → real acoustic features → biased
+  label) end-to-end in this sandbox — no real mic access here. The bias mechanism itself is covered by
+  the `detectAudioEmotion()` unit tests above; recommend a manual mic test in a real browser session.

@@ -58,6 +58,10 @@ wss.on("connection", async (ws: WebSocket, request) => {
   // playing audio over what the user is now saying.
   let generation = 0;
   let turnAudioChunks: Buffer[] = [];
+  // Manual acoustic-engine calibration knob (-1..1, default 0), set via the
+  // "set_sensitivity_bias" control message — see detectAudioEmotion()'s
+  // opts doc in lib/emotion/audio-emotion.ts. Persists for this connection.
+  let sensitivityBias = 0;
 
   // Initialize Deepgram Live stream wrapper (16kHz — browser mic default)
   const dg = new DeepgramLiveWrapper((text, isFinal) => {
@@ -108,6 +112,7 @@ wss.on("connection", async (ws: WebSocket, request) => {
         transcript: text,
         sttConfidence: 0.9,
         acousticFeatures,
+        sensitivityBias,
         // Full per-engine breakdown (HF/Lexicon/Local ONNX/Acoustic) so the
         // live test drawer can show the same diagnostics the Text demo does,
         // not just the fused label.
@@ -196,9 +201,17 @@ wss.on("connection", async (ws: WebSocket, request) => {
   // first action, before this line yields to the event loop.
   const dgConnectPromise = dg.connect();
 
-  // Handle incoming messages from the client (usually raw audio buffers)
-  ws.on("message", (message) => {
-    if (Buffer.isBuffer(message)) {
+  // Handle incoming messages from the client (usually raw audio buffers).
+  // Discriminate on `isBinary`, not `Buffer.isBuffer(message)` — this ws
+  // version delivers BOTH binary and text frames as Buffer objects, so
+  // Buffer.isBuffer() was always true regardless of frame type. That meant
+  // every text control message (ping, barge_in, and this file's new
+  // set_sensitivity_bias) was silently misrouted into the "it's audio"
+  // branch below — fed to Deepgram as garbage PCM and never reaching the
+  // JSON.parse branch at all. Found while live-testing set_sensitivity_bias
+  // against a real running server; a real pre-existing bug, not new.
+  ws.on("message", (message, isBinary) => {
+    if (isBinary && Buffer.isBuffer(message)) {
       audioChunkCount++;
       audioByteCount += message.length;
       if (audioChunkCount === 1) {
@@ -227,6 +240,12 @@ wss.on("connection", async (ws: WebSocket, request) => {
           isBusy = false;
           turnAudioChunks = [];
           console.log(`[Server] Barge-in — generation now ${generation}.`);
+        } else if (payload.type === "set_sensitivity_bias") {
+          const value = Number(payload.value);
+          if (Number.isFinite(value)) {
+            sensitivityBias = Math.max(-1, Math.min(1, value));
+            console.log(`[Server] Sensitivity bias set to ${sensitivityBias}.`);
+          }
         }
       } catch (e) {
         // ignore

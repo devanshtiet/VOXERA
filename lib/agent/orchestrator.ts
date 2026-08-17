@@ -35,6 +35,12 @@ export interface TurnInput {
   bargeInCount?: number;
   /** Per-call override for CONFIG.emotion.diagnosticMode — lets callers (e.g. the demo UI) opt into the full engine breakdown without changing the global production default. */
   diagnostics?: boolean;
+  /** Manual acoustic-engine calibration knob (-1..1, default 0) — see
+   * detectAudioEmotion()'s opts doc in lib/emotion/audio-emotion.ts.
+   * Positive nudges scoring toward positive/calm labels, negative toward
+   * negative labels. Lets a judge/operator counteract the acoustic engine's
+   * documented tendency to over-read ambiguous audio as negative. */
+  sensitivityBias?: number;
   /** Agent Builder (lib/db/agents.ts) agent id. When present, its owning
    * tenant's clientId overrides the plain `clientId` field above (so
    * retrieval/knowledge scoping follows the agent, not a separately-passed
@@ -182,7 +188,7 @@ export async function handleTurn(input: TurnInput): Promise<TurnOutput> {
   const textEmoResult = await detectTextEmotion(input.transcript);
   const textEmo = textEmoResult.primary;
   const audioEmo = input.acousticFeatures
-    ? detectAudioEmotion(input.acousticFeatures)
+    ? detectAudioEmotion(input.acousticFeatures, { sensitivityBias: input.sensitivityBias })
     : (input.audioEmotion ?? null);
   const fused = fuseEmotion(textEmo, audioEmo);
 
