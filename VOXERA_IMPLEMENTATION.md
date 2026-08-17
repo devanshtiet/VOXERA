@@ -1648,3 +1648,345 @@ compact JSON only for event types without a dedicated summary.
 - Could not click through with real account data in this sandbox (behind login, no credentials
   available) — recommend a manual pass to confirm the flat styling and event-summary rewrite render
   correctly against real session data
+
+### 2026-08-17 — Dashboard v2: Business-Impact Metrics, Voice Orb, Glassmorphism
+
+**Objective**: Immediate follow-up to the flat-color dashboard redesign above — user supplied a
+reference screenshot (a course-platform dashboard) and asked for real interactivity: a voice-reactive
+orb on the profile/header area, glassmorphism, a distinct "analytical" font for numbers, and — framed
+as the core question — "imagine yourself as a business owner: what would you actually want to see when
+you open this, that tells you to keep paying for the AI agent?"
+
+**Business-impact metrics (the actual ask, not just decoration)**: added a hero row above the existing
+KPI grid, reframing already-real `/api/analytics` data around ROI instead of raw counts: **Booking
+Conversion** (already existed, now the headline), **Resolved Without Escalation**
+(`100 - escalations/totalCalls*100` — the "the AI can actually handle this alone" number),
+**Positive Caller Sentiment** (share of detected emotions in `{joy, gratitude, excitement, calm}` vs
+all detected emotions — a real proxy for "are callers having a good experience," not a survey score
+that doesn't exist), and **Avg. Handle Time** (already existed, promoted). All four are derived
+entirely from data the API was already computing — no new fabricated metric, no invented percentage.
+
+**Voice orb**: reused `.voxera-orb` — the exact CSS already driving the real, audio-amplitude-reactive
+orb in `TestAgentDrawer.tsx`'s Live Test Call — rather than building a second, decorative one from
+scratch. Extracted it into a reusable `VoiceOrb` component (`app/_components/VoiceOrb.tsx`). On the
+dashboard there's no live microphone to react to, so it's wired to `LiveCallMonitor`'s real SSE stream
+instead: `LiveCallMonitor` gained an `onLiveUpdate` callback (`active`, `intensity`, `caiScore`,
+`emotionLabel`, all genuine values from the session's live emotion/CAI events) that the dashboard uses
+to drive the orb's `--level` whenever a real call is in progress. When no call is active, the orb
+switches to a `.is-idle` CSS class instead — a gentle "ambient breathing" animation, deliberately
+distinct from (and never simultaneous with) the real-data-driven state, so it never claims to be
+reacting to something that isn't there. Required registering `--level` via `@property` in
+`globals.css` so `@keyframes` can animate it smoothly at all (plain custom properties don't
+interpolate) — verified this doesn't affect the existing JS-driven usage in `TestAgentDrawer.tsx`,
+which sets `--level` directly and never applies `.is-idle`.
+
+**Glassmorphism + font**: replaced the dashboard's opaque white cards with `bg-white/70 backdrop-blur-xl`
+frosted-glass surfaces (new shared `GlassCard` component) sitting over a very-low-opacity ambient
+gradient wash on the page background — the blur/translucency needs something soft underneath to
+actually read as "glass" against. All KPI/stat numbers now render in `font-mono` with `tabular-nums`
+for a consistent "data terminal" register, distinct from the `font-display` headline typeface used for
+prose. Added a subtle cursor-following glow (`CursorGlow`, a fixed-position blurred radial gradient
+tracking `mousemove`) rather than replacing the OS cursor outright — keeps native pointer affordances
+and accessibility intact while still feeling more alive.
+
+**Found and fixed while touching this**: `LiveCallMonitor.tsx` (the dashboard's centerpiece "Live Call
+& Emotion Monitor" panel) was using hardcoded Tailwind `slate-*`/`indigo-*` colors instead of this
+app's `--color-*`/`--console-*` design tokens — a real, pre-existing off-brand inconsistency, not
+something introduced by the earlier flat-color pass (that pass only touched `app/admin/page.tsx`
+itself). Rebuilt it onto the `.voxera-console` dark-instrument-panel treatment already established for
+live/real-time monitoring surfaces elsewhere (`/demo`'s Live Engine Console, `TestAgentDrawer.tsx`) —
+consistent with the deliberate light/dark split already documented in `globals.css`, not a new pattern.
+
+**Files Added**: `app/_components/VoiceOrb.tsx`
+
+**Files Modified**: `app/admin/page.tsx`, `components/admin/LiveCallMonitor.tsx`, `app/globals.css`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing), `npm run build` — all clean
+- Live browser check of `/demo`'s Live Call mode (the only other real consumer of `.voxera-orb`) after
+  the `globals.css` changes — screenshot-confirmed no visual or behavioral regression, since the new
+  `@property`/`.is-idle` rules are additive and scoped by class, and `TestAgentDrawer.tsx` never
+  applies `.is-idle`
+- Could not click through `/admin` itself with real account data in this sandbox (behind login, no
+  credentials available) — recommend a manual pass, especially to confirm the orb's idle-vs-live state
+  transition when starting/ending a real "Try a Call" session
+
+### 2026-08-17 — LiveCallMonitor Corrected to Light Theme; Shared Glass Design System Extracted
+
+**Objective**: The prior entry's decision to keep `LiveCallMonitor` on the dark `.voxera-console`
+treatment was explicitly overridden by the user after seeing it live: everywhere in the admin platform
+except the public "talk to my agent" widget must be light/white-themed, and the same glass treatment
+must be consistent across every admin page.
+
+**Changes**: Rewrote `LiveCallMonitor.tsx` onto `GlassCard` (new `app/_components/GlassCard.tsx`,
+exporting `GlassCard` and `AmbientBackground`) and `--color-*` design tokens throughout — header,
+empty state, active-call selector, Detected Emotion / CAI cards, pattern-flag banner, transcript
+stream. The `onLiveUpdate` callback (drives the header `VoiceOrb` from real call signal) was left
+untouched. Extracted `CursorGlow` the same way (`app/_components/CursorGlow.tsx`) and now render both
+`AmbientBackground` and `CursorGlow` once at `app/admin/layout.tsx`, so every admin page gets the same
+background/cursor treatment automatically instead of each page carrying its own copy — removed the
+now-redundant local copies from `app/admin/page.tsx`.
+
+**Files Added**: `app/_components/GlassCard.tsx`, `app/_components/CursorGlow.tsx`
+
+**Files Modified**: `app/admin/layout.tsx`, `app/admin/page.tsx`, `components/admin/LiveCallMonitor.tsx`
+
+**Validation**: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing), `npm run build` —
+all clean.
+
+**Still pending** (separate task, not yet started): propagating this same `GlassCard`/`--color-*`
+treatment to the other admin pages restyled in an earlier pass with flat opaque-white cards — Agent
+Builder, Try a Call, Tenants, Sessions, Knowledge Base, RAG Debugger, Settings.
+
+### 2026-08-17 — Root-Caused and Fixed: Real Phone Calls Never Actually Streamed Audio in Production
+
+**Objective**: User reported the calling system needed to "work perfectly" with live updates showing
+in the Dashboard and Sessions, pointing at the live ECS deployment
+(`vo-2882c61ad83f44399c60d35c29921a12.ecs.ap-south-1.on.aws`). Investigated rather than assumed —
+found two real, verified bugs, not a vague "make it work better."
+
+**Root cause #1 — the Twilio Media Stream WebSocket never actually connected in production.**
+`app/api/telephony/incoming/route.ts` returns TwiML pointing Twilio's `<Connect><Stream>` at
+`/api/telephony/stream`, which was implemented as an App Router route handler trying to grab the raw
+Node socket off the request (`(req as any).socket ?? (req as any)._socket`) and manually complete a
+WebSocket handshake. This doesn't work: Next.js App Router route handlers are only ever invoked for
+complete HTTP request/response cycles — the `'upgrade'` event (how WS handshakes actually happen) is
+handled at the raw `http.Server` level and never reaches a route handler at all, regardless of socket
+access tricks. **Verified live**, not assumed: connecting a real WebSocket client to
+`wss://vo-2882c61ad83f44399c60d35c29921a12.ecs.ap-south-1.on.aws/api/telephony/stream` returned a
+502/500 on every attempt. This means every real phone call would answer (Twilio gets valid TwiML) and
+then go completely silent — no audio ever reached `TelephonyStreamHandler`, so no STT, no LLM turns, no
+TTS, and no emotion/transcript events, which is also why nothing showed up live anywhere.
+
+**Fix**: added `custom-server.ts` — the standard Next.js custom-server pattern: a plain
+`http.createServer` delegates ordinary requests to Next's handler and separately listens for the
+`'upgrade'` event, matching `/api/telephony/stream` and completing the WS handshake itself
+(`WebSocketServer({ noServer: true }).handleUpgrade`) before handing the socket to
+`TelephonyStreamHandler`, unchanged. Deleted the broken `app/api/telephony/stream/route.ts`. Removed
+`output: "standalone"` from `next.config.ts` (its auto-generated `server.js` doesn't support custom
+`'upgrade'` handling) and rewrote the Dockerfile's runner stage to ship the full build + full
+production `node_modules` and run `npx tsx custom-server.ts` instead of `node server.js`. Moved `tsx`
+from devDependencies to dependencies since it now runs at production runtime. `package.json`'s
+`"start"` script now runs the custom server too; added `"dev:full"` for running it locally against a
+non-Next-dev build if testing telephony end-to-end locally is ever needed.
+
+**Root cause #2 — the Dashboard's Live Call Monitor was subscribing to the wrong SSE channel for real
+calls.** `TelephonyStreamHandler` generates its own `sessionId` (`tel-xxx`) distinct from Twilio's
+`callSid`, and persists it onto the `call_logs` row's `sessionId` column — `lib/agent/orchestrator.ts`
+publishes every live emotion/transcript/CAI event to Redis channel `session:${sessionId}` (the `tel-xxx`
+one). `LiveCallMonitor.tsx` picked `call.id || call.sessionId` when selecting which session to open an
+SSE connection to — since `call.id` (the callSid) is always truthy, it always subscribed to
+`session:${callSid}`, a channel nothing ever publishes to. Even with root cause #1 fixed, the dashboard
+would still show zero live updates for real phone calls. Fixed by flipping the fallback order to
+`call.sessionId || call.id` in both the initial auto-select effect and the manual call-picker's
+`onClick`/highlight logic.
+
+**Verified, not just claimed**: ran `custom-server.ts` locally in production mode
+(`NODE_ENV=production`), confirmed a raw WebSocket client now receives `101 Switching Protocols`
+against `/api/telephony/stream` (previously 502/500 against the live deployment), confirmed normal
+HTTP routes (`/`, `/login`) still serve `200` through the same server, and confirmed the server log
+shows `TelephonyStreamHandler` actually instantiating, connecting to Deepgram Live, and starting a real
+session (`[TelephonyStream] Call started: test123, session: tel-kVXBbXHb3XCK`) — this is the real path
+a Twilio call takes, not a mock.
+
+**What still requires the user's own action** (no deploy access, no Twilio account, no phone in this
+sandbox):
+1. **Redeploy** the updated Docker image to ECS — this fix only takes effect once the new image (with
+   `custom-server.ts` as the entrypoint) is built and pushed.
+2. **Twilio webhook**: point the phone number's Voice webhook directly at
+   `https://vo-2882c61ad83f44399c60d35c29921a12.ecs.ap-south-1.on.aws/api/telephony/incoming` — **no
+   ngrok needed**, since the app is already publicly hosted. ngrok is only for exposing a local dev
+   server; it doesn't apply to an already-deployed ECS service. (`npm run dev:full` + ngrok remains
+   available if local telephony testing against your laptop specifically is ever wanted instead.)
+3. **Tenant/clientId mapping**: `/api/telephony/incoming` resolves `clientId` from a `phone_numbers`
+   table lookup by the called number, falling back to `DEFAULT_CLIENT_ID` env var, then `"demo"`. The
+   Dashboard's `/api/session/active` filters strictly by `clientId = <logged-in admin's user id>` — if
+   the Twilio number isn't registered in `phone_numbers` against that same id (or `DEFAULT_CLIENT_ID`
+   isn't set to it), a real call will connect and stream fine but never appear as "active" for that
+   admin login. This is tenant configuration, not a code bug — flagging it since it would otherwise
+   look like the fix didn't work.
+4. Real end-to-end verification (an actual phone ringing through) cannot happen in this sandbox — no
+   phone, no Twilio account access.
+
+**Files Added**: `custom-server.ts`
+
+**Files Modified**: `next.config.ts`, `Dockerfile`, `package.json`,
+`components/admin/LiveCallMonitor.tsx`
+
+**Files Removed**: `app/api/telephony/stream/route.ts`
+
+**Validation Performed**: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing),
+`npm run build` — all clean. Live local verification of the WS handshake and normal HTTP routing
+through `custom-server.ts` as described above.
+
+### 2026-08-17 — Admin Platform: Dark Glassmorphism Theme (Reversing the Earlier Light-Theme Call)
+
+**Objective**: User provided a reference screenshot (a dark "Channel Analytics" dashboard — translucent
+glass cards over a near-black background, a warm gradient hero panel, stat pills with colored
+underlines, mini sparkline cards) and asked for the whole admin platform to match it exactly:
+same fonts, alignment, colors, structure, and glassmorphism. This explicitly reverses the light-theme
+instruction from two entries above — confirmed directly with the user before proceeding, since it
+undoes work from the same session.
+
+**Mechanism — reused the existing dark-theming pattern instead of inventing a new one**: `/demo`
+already had a proven scoped-class pattern (`.voxera-demo-dark`) that redefines the app's semantic
+`--color-*` tokens to the existing `--console-*` dark palette for everything under that class, without
+touching individual component files (documented in an earlier entry). Added the identical
+`.voxera-admin-dark` class (`app/globals.css`) and applied it once at the root of `app/admin/layout.tsx`
+— every admin page, including ones not yet individually touched (e.g. `/admin/sessions`), immediately
+inherits the dark theme through the token cascade. Added `--console-orange` / `--console-orange-deep`
+tokens for the new hero gradient accent (the reference's warm tone), reusing the existing violet/cyan
+console accents everywhere else rather than inventing a third palette. Extended the existing overscroll
+background-flash fix (`html:has()/body:has()`) to also match `.voxera-admin-dark`.
+
+**Component changes**:
+- `GlassCard`/`AmbientBackground` (`app/_components/GlassCard.tsx`) rewritten for dark glass:
+  `bg-white/[0.045]` translucent panels with `border-white/10` and a black-tinted shadow (was
+  `bg-white/70` + violet-tinted shadow), and the ambient wash recolored to orange/violet/cyan radial
+  glows instead of violet/cyan on white.
+- `app/admin/layout.tsx`: sidebar surface now uses the same translucent-dark treatment, wordmark got
+  an orange→violet gradient to match the new accent, nav-item hover icon color switched to orange.
+- `app/admin/page.tsx`: replaced the plain "Business Impact" 4-card grid with a `HeroPanel` — a
+  gradient panel (orange/violet radial gradients + a decorative concentric-rings SVG standing in for a
+  hero photo, since fabricating a stock photo of an unrelated person for a B2B voice-agent product
+  would be dishonest) with a headline, a "View Sessions" CTA, and the same four real metrics
+  (conversion, resolution rate, sentiment, handle time) now rendered as underlined stat pills — mirroring
+  the reference's stat-pill row, not copying its unrelated "Users/Clicks/Sales/Items" content. Added
+  `LiveVolumeCard` (a hand-rolled SVG `Sparkline` over the existing hourly-heatmap data — mirrors the
+  reference's "Active Users right now" card with zero new charting dependency) and `CaiSummaryCard`
+  (mirrors the reference's "Latest Sales" thumbnail-card pattern using the real average CAI score).
+  Bulk-converted every remaining hardcoded `bg-white/NN`/`text-*-600` light-mode utility class in this
+  file and in `components/admin/LiveCallMonitor.tsx` (left over from the previous light-theme pass) to
+  their dark-appropriate equivalents (`bg-white/[0.0N]`, `text-*-400`) — a plain `--color-*` token
+  redefinition doesn't touch literal Tailwind palette classes, so these needed a manual pass.
+
+**A real bug found and fixed while verifying visually, not part of the theme change**: the overscroll
+background-flash CSS rule was correct in source but the running dev server was serving a stale
+Turbopack-cached CSS bundle — confirmed by diffing `document.styleSheets` against the source file (the
+compiled output was missing the entire `.voxera-admin-dark` block and `--console-orange` tokens even
+after a process restart). Fixed by clearing `.next` entirely before restarting; unrelated to the theme
+work itself but worth noting since the symptom (a white gap appearing partway down the page on scroll)
+looked like a real CSS bug at first.
+
+**Files Added**: none
+
+**Files Modified**: `app/globals.css`, `app/_components/GlassCard.tsx`, `app/admin/layout.tsx`,
+`app/admin/page.tsx`, `components/admin/LiveCallMonitor.tsx`
+
+**Validation Performed**: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing),
+`npm run build` — all clean. Live-verified in-browser this time (not just code review): created a
+throwaway local test account (`verify-ui-check@voxera-local-test.dev`, local dev Supabase only — not
+the production/ECS database) since this sandbox has no real admin credentials, and confirmed via
+screenshots and DOM/computed-style inspection that the hero panel, stat pills, sparkline/CAI cards, KPI
+grid, Live Telephony, Session Performance, Peak Hours Heatmap, and the untouched `/admin/sessions` page
+all render correctly in the dark theme with no illegible text or broken layout.
+
+**Still pending** (task #67, not started): applying the same `GlassCard`-based dark treatment
+consistently to the six other admin pages that inherited the dark tokens automatically but still use
+their previous light-glass-era markup/spacing conventions (Agent Builder, Try a Call, Tenants, Sessions,
+Knowledge Base, RAG Debugger, Settings) — they're legible and not broken today, just not yet polished to
+match the Dashboard's new hero/pill/sparkline visual language.
+
+### 2026-08-17 — Sessions Analytics Redesign, Default Inbound Agent, Bulk Outbound Campaigns
+
+**Objective**: Three features requested together: (1) the Sessions page was a confusing raw JSON event
+dump with no real analytics; (2) inbound calls always used the tenant's one default prompt with no way
+to route a specific phone number to a specific Agent Builder agent; (3) no way to place calls to many
+recipients at once with per-call results.
+
+**1 — Sessions tab.** Rewrote `app/admin/sessions/page.tsx` into four tabs (Overview / Transcript /
+Emotion Timeline / Diagnostics) computed client-side from the same `/api/session/[sessionId]` event log
+— no schema change. Overview derives duration, user-turn count, avg/last CAI, dominant emotion, and
+escalations from the existing `emotion`/`cai`/`utterance`/`escalation` event types. **Found a real gap
+while building the Transcript tab**: `session_logs` only ever persisted the *caller's* side of the
+conversation (`type: "utterance"`) — the agent's replies existed only on the ephemeral SSE channel used
+by the live dashboard, never written to `session_logs`, so a completed session's transcript could only
+ever show half a conversation. Fixed in `lib/agent/orchestrator.ts` by logging a second `utterance`
+event (`role: "agent"`) alongside the existing `llm_reply` metadata-only log, right where the agent's
+`agentTurn` is already constructed — new sessions now get a real two-sided transcript; already-completed
+sessions predate the fix and can't be retroactively completed.
+
+**2 — Default inbound agent per phone number.** `phone_numbers` (queried by `/api/telephony/incoming`
+but never previously written to by any UI — confirmed via repo-wide grep, only that one read existed)
+gained an `agentId` column (`sql/migration_v12.sql`, also folded into `migration_consolidated.sql`).
+Built full CRUD at `app/api/settings/phone-numbers/route.ts` and a new "Phone Numbers & Inbound Routing"
+section in `app/admin/settings/page.tsx` — register a number, assign an agent from a dropdown (sourced
+from `listAgentsForTenant`), toggle active, delete. Threaded `agentId` through
+`lib/telephony/stream-handler.ts` (`StreamHandlerOptions.agentId` → `handleTurn`'s existing `agentId`
+param, unchanged) and `custom-server.ts`'s WS upgrade handler. `/api/telephony/incoming/route.ts` now
+resolves `agentId` from the `phone_numbers` row alongside `clientId`.
+
+**3 — Bulk outbound campaigns.** New `call_campaigns`/`campaign_calls` tables
+(`sql/migration_v12.sql`). Extracted the single-call logic from `app/api/telephony/outbound/route.ts`
+into `lib/telephony/outbound.ts` (`placeOutboundCall`) so both the existing single-call route and the
+new campaign dispatcher (`lib/telephony/campaign-dispatcher.ts`) go through identical webhook
+construction and `call_logs` writes. The dispatcher runs detached from the `POST /api/campaigns` request
+(this app runs on a persistent Node process — `custom-server.ts` — not serverless, so a fire-and-forget
+async function keeps executing after the response is sent) with a concurrency cap of 2 and a 400ms gap
+between dials, to avoid hammering Twilio's call-creation API. New `/admin/campaigns` page: create a
+campaign (name, agent picker reusing `/api/admin/agents`, recipient textarea with client-side E.164
+validation), campaign list, and a detail view that polls every 3s while the campaign is running, showing
+per-recipient status and a live progress/failure count.
+
+**Two real, unrelated bugs found and fixed while wiring the agent/campaign call paths through**
+`/api/telephony/incoming` — not something either feature could have worked correctly without:
+- **Every outbound call was silently failing to connect once answered.** `/api/telephony/outbound`
+  inserts a `call_logs` row (`status: "outbound_initiated"`) the moment a call is placed; when Twilio
+  then hits `/api/telephony/incoming` once the recipient answers, that route did a plain `.insert()` on
+  the *same* `callSid` — a primary-key violation on every single outbound call, caught by the top-level
+  try/catch and silently rejected with `buildRejectTwiml()`. Changed to `.upsert(..., { onConflict: "id"
+  })`. This was pre-existing and would have made every campaign call fail identically regardless of the
+  new agent/campaign plumbing.
+- **Outbound call outcomes were never recorded.** `initiateOutboundCall` never set Twilio's
+  `statusCallback`, so `/api/telephony/status` (which already existed and already correctly mapped
+  Twilio's completed/busy/no-answer/failed events to `call_logs.status`) never actually received any
+  callbacks for outbound calls — `call_logs.status` stayed at `"outbound_initiated"` forever. Added
+  `statusCallback`/`statusCallbackEvent` to `initiateOutboundCall`, and extended the status route to also
+  roll a campaign call's real outcome into its `campaign_calls` row and the parent campaign's
+  `completedCount`/`failedCount`. Without this, every campaign call would have looked permanently
+  "calling" regardless of whether it actually connected.
+
+**A signature-validation detail specific to routing agentId through the webhook URL**: outbound calls
+(including campaign calls) now carry `?clientId=&agentId=` on the `/api/telephony/incoming` webhook URL
+Twilio is given, since `To` on an outbound call's callback is the recipient dialed, not one of the
+tenant's own registered numbers — the existing `phone_numbers` lookup only applies to genuine inbound
+calls. Twilio signs the exact URL it was given including that query string; the route's signature
+reconstruction previously hardcoded a bare `${baseUrl}/api/telephony/incoming` with no query string,
+which would have rejected every outbound-triggered webhook call as an invalid signature the moment
+`TWILIO_AUTH_TOKEN` is set. Fixed by reconstructing with `req.nextUrl.search` appended.
+
+**Files Added**: `sql/migration_v12.sql`, `app/api/settings/phone-numbers/route.ts`,
+`lib/telephony/outbound.ts`, `lib/telephony/campaign-dispatcher.ts`, `app/api/campaigns/route.ts`,
+`app/api/campaigns/[id]/route.ts`, `app/admin/campaigns/page.tsx`
+
+**Files Modified**: `app/admin/sessions/page.tsx`, `lib/agent/orchestrator.ts`,
+`app/admin/settings/page.tsx`, `lib/telephony/stream-handler.ts`, `custom-server.ts`,
+`app/api/telephony/incoming/route.ts`, `app/api/telephony/outbound/route.ts`, `lib/telephony/twilio.ts`,
+`app/api/telephony/status/route.ts`, `app/admin/layout.tsx`, `sql/migration_consolidated.sql`
+
+**Validation Performed**: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (316 passing),
+`npm run build` — all clean. Live-verified in-browser with the same throwaway local test account:
+confirmed the redesigned Sessions page, the new Settings phone-numbers section (including the exact
+expected `agentId` schema-cache error, since the migration hasn't been run against this dev database —
+correctly surfaced instead of crashing), the Bulk Calls list/create flow, and campaign creation
+correctly hitting the same "needs a public URL Twilio can reach" guard the existing single-call feature
+already used, confirming the new code path is wired identically to a known-working one.
+
+**Requires the user's own action**: run `sql/migration_v12.sql` against the production Supabase
+database — none of the three features function until the `phone_numbers.agentId` column and the
+`call_campaigns`/`campaign_calls` tables exist. No deploy/DB credentials available in this sandbox to do
+it directly.
+
+**2026-08-17, later — migration applied.** The user provided a direct Postgres connection string
+(pooler host, since `db.<ref>.supabase.co:5432` doesn't resolve from this sandbox — Supabase's
+IPv4-restricted direct host). Ran `migration_v12.sql` against production via `pg`, forced a PostgREST
+schema-cache reload (`NOTIFY pgrst, 'reload schema'`) since PostgREST caches the schema and briefly
+still returned the old "column not found" error otherwise, then verified read-only via
+`information_schema` that `phone_numbers.agentId` and both campaign tables now exist. Live-tested
+through the actual running app (not just the DB): added a real phone number via Settings and confirmed
+it round-trips correctly (previously failed with the exact "agentId column not found" schema-cache
+error); verified `call_campaigns`/`campaign_calls` insert, foreign-key cascade delete, and read-back via
+a synthetic campaign row, then deleted it — no leftover test data. Also removed the test phone number
+added during verification. The connection string is stored only in the gitignored `.env.local`
+(confirmed via `.gitignore`), used solely for this one-off migration run — the app itself continues to
+talk to Supabase exclusively through the REST API (`SUPABASE_URL`/keys), unchanged.
