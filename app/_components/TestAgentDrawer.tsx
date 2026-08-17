@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Radio, X, Phone, PhoneOff, Sparkles, ChevronDown, Database, ListTree } from "lucide-react";
+import { Radio, X, Phone, PhoneOff, Sparkles, ChevronDown, Database, ListTree, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { getMicSupport, describeMicError } from "./micUtils";
 import { useVoiceActivityDetection } from "./useVoiceActivityDetection";
 import {
@@ -74,6 +74,12 @@ interface TranscriptTurn {
   policy?: TurnPolicy;
   memory?: TurnMemory;
   timings?: TurnTimings;
+  /** Which custom agent actually resolved server-side for this reply —
+   * undefined when no agentId was requested, or a custom agent lookup
+   * failed and it silently fell back to the demo agent. */
+  resolvedAgent?: { id: string; name: string };
+  llmModel?: string;
+  usedLiveLlm?: boolean;
 }
 
 function downsampleTo16kMono(input: Float32Array, inputSampleRate: number): Int16Array {
@@ -97,6 +103,65 @@ function readLevel(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number
     sumSq += centered * centered;
   }
   return Math.min(1, Math.sqrt(sumSq / buf.length) * 4); // *4 — RMS of speech is quiet relative to full-scale
+}
+
+/** Makes two easy-to-misdiagnose failure modes visible instead of silent:
+ * (1) a custom agent was selected for testing but the server-side lookup
+ * didn't find it, so the turn silently fell back to the demo agent's
+ * prompt — previously indistinguishable from the custom agent actually
+ * being used; (2) every LLM provider failed and the reply is the generic,
+ * agent-agnostic offline-fallback string, which looks identical to a
+ * real "the agent isn't using my prompt" bug unless it's labeled as such. */
+function AgentStatusBanner({
+  turn,
+  requestedAgentName,
+}: {
+  turn: TranscriptTurn;
+  requestedAgentName: string | null;
+}) {
+  const rows: { tone: "ok" | "warn"; text: string }[] = [];
+
+  if (requestedAgentName !== null) {
+    if (turn.resolvedAgent) {
+      rows.push({ tone: "ok", text: `Agent: ${turn.resolvedAgent.name}` });
+    } else {
+      rows.push({
+        tone: "warn",
+        text: `"${requestedAgentName}" wasn't found server-side — this reply used the demo agent's prompt instead.`,
+      });
+    }
+  }
+
+  if (turn.usedLiveLlm === false) {
+    rows.push({
+      tone: "warn",
+      text: "No LLM provider responded (ZenMux/Groq/OpenAI all failed or are unset) — this is a generic canned reply, not generated from any agent's prompt.",
+    });
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-col gap-1.5">
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10.5px] leading-snug ${
+            r.tone === "ok"
+              ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-400"
+              : "border-amber-500/30 bg-amber-500/[0.06] text-amber-400"
+          }`}
+        >
+          {r.tone === "ok" ? (
+            <CheckCircle2 className="w-3 h-3 mt-0.5 flex-none" />
+          ) : (
+            <AlertTriangle className="w-3 h-3 mt-0.5 flex-none" />
+          )}
+          <span>{r.text}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** Real per-stage wall-clock timing for one reply, as a proportional bar —
@@ -497,6 +562,9 @@ export function TestAgentDrawer() {
                   policy: msg.trace?.policy,
                   memory: { write: msg.trace?.memoryWrite, retrieved: msg.trace?.retrieved },
                   timings: msg.trace?.timings,
+                  resolvedAgent: msg.trace?.agent,
+                  llmModel: msg.trace?.llmModel,
+                  usedLiveLlm: msg.trace?.usedLiveLlm,
                 },
               ]);
               setSelectedTurnId(turnId);
@@ -726,6 +794,9 @@ export function TestAgentDrawer() {
                   </button>
                 )}
               </div>
+              {selectedTurn && (activeAgentName !== null || selectedTurn.usedLiveLlm === false) && (
+                <AgentStatusBanner turn={selectedTurn} requestedAgentName={activeAgentName} />
+              )}
               {selectedTurn?.diagnostics ? (
                 <>
                   <EngineDiagnosticPanel diagnostics={selectedTurn.diagnostics} compact />

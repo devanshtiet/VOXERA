@@ -1079,3 +1079,36 @@ list, and a more organized editor — "make this the best voice agent builder."
   fence-stripping logic the route uses
 - Could not click through the dialog/tabbed editor itself in-browser — no reachable Supabase
   connection to log in from this sandbox — left for the user to verify the UI interactions
+
+### 2026-08-17 — Made "Is My Custom Agent Actually Being Used?" Diagnosable
+
+**Objective**: Reported live with a screenshot: a custom "Mia" agent was selected in the test drawer,
+but the reply was generic canned text, and the user couldn't tell whether Mia's prompt was actually
+being used or the system had silently fallen back to something else.
+
+**Diagnosis**: The reply text was a verbatim match to `offlineFallback()`'s hardcoded default string
+(`lib/agent/llm.ts`) — proof no LLM provider (ZenMux/Groq/OpenAI) actually responded; that fallback is
+deliberately generic and agent-agnostic, so it looks identical whether or not a custom agent resolved.
+Separately, the orchestrator already computed which agent resolved server-side for each turn
+(`trace.agent`, from the earlier Agent Builder work) but the drawer never displayed it — so there was
+genuinely no way to see whether "Mia" was found or the turn silently fell back to the demo agent.
+
+**Changes Implemented**: `TestAgentDrawer.tsx` now surfaces both facts explicitly per turn, via a new
+`AgentStatusBanner`:
+- If a custom agent was requested and resolved server-side: a green "Agent: Mia" confirmation.
+- If a custom agent was requested but not found server-side: an amber warning that the reply used the
+  demo agent's prompt instead.
+- If no LLM provider responded at all (`usedLiveLlm === false`): a separate amber warning that the
+  reply is a generic canned fallback, not generated from any agent's prompt — this is independent of
+  whether agent resolution succeeded, since a resolved agent's prompt is never even reached if the LLM
+  call itself fails.
+
+**Files Modified**: `app/_components/TestAgentDrawer.tsx`
+
+**Validation Performed**:
+- `npx tsc --noEmit`, `npm run lint`, `npx vitest run` (305 passing), `npm run build` — all clean
+- Verified the banner's exact conditional logic against three scenarios via a standalone script
+  (agent resolved + LLM failed — matches the reported screenshot; agent not found + LLM failed; agent
+  resolved + LLM succeeded) — each produces the correct, unambiguous message
+- Could not click through this live in-browser — the live-call path needs a real microphone and a
+  running `npm run server`, outside this sandbox
